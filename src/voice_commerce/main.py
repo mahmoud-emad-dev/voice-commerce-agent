@@ -9,19 +9,59 @@
 
 from __future__ import annotations
 from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
+from typing import Any
 import logging
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from srv.voice_commerce.config.settings import settings
-
-
+from voice_commerce.config.settings import settings
+from voice_commerce.api.routes import health
 log = structlog.get_logger(__name__)
 
+
+def configure_logging() -> None:
+    """
+    Configure structlog for structured JSON logging.
+    Called once at application startup.
+ 
+    The configuration chain:
+    1. structlog.contextvars.merge_contextvars — adds any context variables
+       (like tenant_id) that were bound with structlog.contextvars.bind_contextvars()
+    2. structlog.stdlib.add_log_level — adds the "level" field to every log entry
+    3. structlog.stdlib.add_logger_name — adds the "logger" field (which file logged it)
+    4. structlog.processors.TimeStamper — adds ISO 8601 timestamp
+    5. structlog.dev.ConsoleRenderer — pretty output in dev (JSON in production)
+    """
+    log_level = getattr(logging, settings.log_level, logging.INFO)
+ 
+    structlog.configure(
+        processors=[
+            # Merge any contextvars (we'll use this in Phase 13 to auto-attach tenant_id)
+            structlog.contextvars.merge_contextvars,
+            # Add standard fields to every log entry
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.processors.TimeStamper(fmt="iso"),
+            # In debug mode: pretty colored output for readability
+            # In production: JSON output for machine parsing
+            structlog.dev.ConsoleRenderer() if settings.app_debug
+            else structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+    )
+ 
+    # Also configure the standard library logging to the same level
+    # (some libraries use stdlib logging directly)
+    logging.basicConfig(level=log_level, format="%(message)s")
+
+
 @asynccontextmanager
-async def lifespan():
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     # --- STARTUP ---
     log.info(
         "voice_commerce_agent_starting",
@@ -39,7 +79,37 @@ def create_app() -> FastAPI:
     """
     Factory function to create and configure the FastAPI instance.
     """
-    app = FastAPI()
+    app = FastAPI(
+        title="Voice Commerce Agent",
+        description="An AI agent for voice commerce applications.",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.app_debug else None,
+    )
 
+    # CORS Middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Adjust this in production
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
+    # Root route - provides a friendly entry point
+    @app.get("/" , tags=["system"])
+    async def root():
+        """
+        Root endpoint returning basic API metadata.
+        """
+        return {
+            "message": "Welcome to the Voice Commerce Agent API",
+            "docs": "/docs",
+            "version": "0.1.0"
+        }
+    # Register other routes
+    app.include_router(health.router ,tags=["system"])
     return app
+
+
+app = create_app()

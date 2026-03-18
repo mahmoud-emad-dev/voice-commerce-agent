@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.135.1",
+    "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "structlog>=25.5.0",
     "uvicorn[standard]>=0.42.0",
@@ -21,3 +22,7 @@ dev = [
 # this says: "Hey Hatch (our build tool), when you try to install this project, the actual code is located in the src/voice_commerce folder."
 [tool.hatch.build.targets.wheel]
 packages = ["src/voice_commerce"]
+
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
