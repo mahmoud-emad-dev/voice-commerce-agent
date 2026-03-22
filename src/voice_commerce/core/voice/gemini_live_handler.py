@@ -19,6 +19,7 @@ class GeminiLiveHandler:
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.gemini_api_key) 
         self._session: Any = None
+        self._session_ctx: Any = None   
         self._config = self._build_session_config()
 
         log.debug(
@@ -85,55 +86,60 @@ class GeminiLiveHandler:
     async def receive_events(self) -> AsyncGenerator[dict[str, Any], None]:
         if self._session is None:
             raise RuntimeError("Cannot receive: Gemini session is not connected.")
-        try:
-            async for response  in self._session.receive():
-                # Gemini sends text in chunks (like a typewriter)
-                response: types.LiveServerMessage
-                if response.text is not None:
-                    log.debug("gemini_text_chunk", length=len(response.text))
-                    yield {"type": "text", "text": response.text}
+        while True:
+            try:
+                async for response  in self._session.receive():
+                    # Gemini sends text in chunks (like a typewriter)
+                    response: types.LiveServerMessage
+                    if response.text is not None:
+                        log.debug("gemini_text_chunk", length=len(response.text))
+                        yield {"type": "text", "text": response.text}
 
-                if response.data is not None:
-                    log.debug("gemini_audio_chunk", bytes=len(response.data))
-                    yield {"type": "audio", "data": response.data}
-                # INPUT TRANSCRIPT (Phase 5+)
-                # Text version of what the USER said (from their audio)
-                if (
-                    response.server_content
-                    and hasattr(response.server_content, "input_transcription")
-                    and response.server_content.input_transcription
-                ):
-                    transcript = response.server_content.input_transcription
-                    if hasattr(transcript, "text") and transcript.text:
-                        log.debug("gemini_input_transcript", text=transcript.text[:80])
-                        yield {"type": "input_transcript", "text": transcript.text}
- 
-                # OUTPUT TRANSCRIPT (Phase 4+)
-                # Text version of what GEMINI said (from its audio response)
-                if (
-                    response.server_content
-                    and hasattr(response.server_content, "output_transcription")
-                    and response.server_content.output_transcription
-                ):
-                    transcript = response.server_content.output_transcription
-                    if hasattr(transcript, "text") and transcript.text:
-                        log.debug("gemini_output_transcript", text=transcript.text[:80])
-                        yield {"type": "output_transcript", "text": transcript.text}
+                    if response.data is not None:
+                        log.debug("gemini_audio_chunk", bytes=len(response.data))
+                        yield {"type": "audio", "data": response.data}
+                    # INPUT TRANSCRIPT (Phase 5+)
+                    # Text version of what the USER said (from their audio)
+                    if (
+                        response.server_content
+                        and hasattr(response.server_content, "input_transcription")
+                        and response.server_content.input_transcription
+                    ):
+                        transcript = response.server_content.input_transcription
+                        if hasattr(transcript, "text") and transcript.text:
+                            log.debug("gemini_input_transcript", text=transcript.text[:80])
+                            yield {"type": "input_transcript", "text": transcript.text}
+    
+                    # OUTPUT TRANSCRIPT (Phase 4+)
+                    # Text version of what GEMINI said (from its audio response)
+                    if (
+                        response.server_content
+                        and hasattr(response.server_content, "output_transcription")
+                        and response.server_content.output_transcription
+                    ):
+                        transcript = response.server_content.output_transcription
+                        if hasattr(transcript, "text") and transcript.text:
+                            log.debug("gemini_output_transcript", text=transcript.text[:80])
+                            yield {"type": "output_transcript", "text": transcript.text}
 
-                # Check if Gemini is finished with its thought
-                if response.server_content and response.server_content.turn_complete:
-                    yield {"type": "turn_complete"}
-                    # return
-        except Exception as e:
-            log.error("gemini_receive_error", error=str(e))
-            yield {"type": "error", "message": "Brain connection lost."}
+                    # Check if Gemini is finished with its thought
+                    if response.server_content and response.server_content.turn_complete:
+                        yield {"type": "turn_complete"}
+                        break  # exit inner loop → outer loop restarts immediately
+            except Exception as exc:
+                error_str = str(exc)
+                if "1000" in error_str or error_str.strip() in ("1000 None.", "1001 None."):
+                    log.info("gemini_session_closed_by_server", reason=error_str)
+                    yield {"type": "session_closed", "reason": error_str}
+                    return  # Stop — session is over, browser will auto-reconnect
+                # Real error — log, notify browser, stop
+                log.error("gemini_receive_error", error=error_str)
+                yield {"type": "error", "message": error_str}
+                return
 
 
     async def __aenter__(self) -> "GeminiLiveHandler":
-        log.info(
-            "gemini_session_connecting",
-            model=settings.gemini_model,
-        )
+        log.info("gemini_session_connecting", model=settings.gemini_model   )
 
         self._session_ctx = self._client.aio.live.connect(
             model=settings.gemini_model,
