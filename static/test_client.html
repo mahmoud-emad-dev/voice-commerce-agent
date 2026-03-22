@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Commerce Agent — Dev Test Client</title>
+  <!--
+    ============================================================
+    static/test_client.html — Phase 5: Full Voice-to-Voice
+    ============================================================
+    NEW IN PHASE 5:
+      - Microphone capture via getUserMedia() + AudioWorklet
+      - Mic audio streamed as PCM s16le binary frames to server
+      - Push-to-talk button (hold to speak, release to let Gemini respond)
+      - Keyboard shortcut: Space to hold, release to send
+      - Barge-in: user can speak while Gemini is responding
+      - User transcript shows what Gemini heard
+      - mic_config message from server controls capture sample rate
+
+    AUDIO ARCHITECTURE IN PHASE 5:
+      CAPTURE (browser → server):
+        AudioContext(16kHz) → getUserMedia() → MediaStreamSource
+          → AudioWorkletNode (pcm-capture-processor.js inline worklet)
+          → ArrayBuffer of Int16 chunks → WebSocket binary frames
+          → Python → gemini.send_audio_chunk() → Gemini VAD
+
+      PLAYBACK (server → browser):
+        Gemini → PCM 24kHz → Python → WebSocket binary → browser
+          → playChunk() → AudioContext(24kHz) → gapless schedule → speakers
+
+    WHY AUDIWORKLET (not ScriptProcessorNode):
+      ScriptProcessorNode runs on the main JS thread — audio processing
+      competes with DOM, WebSocket, and rendering causing dropouts.
+      AudioWorklet runs on a dedicated audio thread with guaranteed
+      real-time priority — no gaps regardless of main thread load.
+      ScriptProcessorNode is also deprecated in all modern browsers.
+
+    WHY PUSH-TO-TALK (not always-on mic):
+      Always-on VAD is ideal but harder to implement cleanly:
+        - Gemini's VAD handles pauses well but sometimes cuts off
+        - Echo cancellation is complex (Gemini's audio comes out of
+          speakers and could be re-captured by the mic)
+      Push-to-talk is deterministic: mic is ONLY active when button is held.
+      This eliminates all echo issues and gives the user full control.
+      Barge-in still works: hold button while Gemini is speaking to interrupt.
+    ============================================================
+  -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f14; --surface: #1a1a24; --surface2: #24243a; --border: #2e2e45;
+      --accent: #7c6ef5; --accent-dim: #4a3fb5;
+      --text: #e8e8f0; --text-dim: #9090a8;
+      --green: #4caf86; --red: #ef5350; --yellow: #ffc107; --orange: #ff7043;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px 48px; }
+
+    .header { width: 100%; max-width: 720px; margin-bottom: 16px; }
+    .header h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .header .subtitle { font-size: 12px; color: var(--text-dim); }
+
+    /* ── Top status bar ── */
+    .top-bar { width: 100%; max-width: 720px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+    .status-pill { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); transition: background .3s; flex-shrink: 0; }
+    .dot.connected { background: var(--green); }
+    .dot.disconnected { background: var(--red); }
+
+    /* Audio playing bars */
+    .audio-bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; opacity: 0; transition: opacity .2s; }
+    .audio-bars.active { opacity: 1; }
+    .audio-bars span { display: block; width: 3px; background: var(--accent); border-radius: 2px; transform-origin: bottom; animation: bars .8s ease-in-out infinite; }
+    .audio-bars span:nth-child(1){height:6px;animation-delay:0s}
+    .audio-bars span:nth-child(2){height:12px;animation-delay:.15s}
+    .audio-bars span:nth-child(3){height:8px;animation-delay:.3s}
+    .audio-bars span:nth-child(4){height:14px;animation-delay:.1s}
+    .audio-bars span:nth-child(5){height:6px;animation-delay:.25s}
+    @keyframes bars { 0%,100%{transform:scaleY(.4)} 50%{transform:scaleY(1)} }
+
+    /* Mic recording indicator */
+    .mic-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--red); opacity: 0; transition: opacity .2s; }
+    .mic-indicator.active { opacity: 1; }
+    .mic-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: micPulse 1s ease-in-out infinite; }
+    @keyframes micPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.7)} }
+
+    .vol-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+    .vol-row input { width: 70px; accent-color: var(--accent); }
+
+    .phase-badge { display: inline-block; font-size: 11px; font-weight: 600; background: var(--surface2); border: 1px solid var(--accent-dim); color: var(--accent); padding: 3px 10px; border-radius: 20px; margin-bottom: 12px; }
+
+    /* ── Chat window ── */
+    #chat { width: 100%; max-width: 720px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-height: 300px; max-height: 440px; overflow-y: auto; margin-bottom: 12px; scroll-behavior: smooth; }
+    .msg { padding: 10px 14px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; line-height: 1.55; max-width: 86%; word-break: break-word; }
+    .msg.user { background: var(--accent-dim); margin-left: auto; text-align: right; border-bottom-right-radius: 2px; }
+    .msg.ai   { background: var(--surface2); border-bottom-left-radius: 2px; }
+    .msg.sys  { background: transparent; color: var(--text-dim); font-size: 12px; text-align: center; max-width: 100%; border: 1px dashed var(--border); }
+    .msg.err  { background: #3a1a1a; color: #ff8080; border: 1px solid var(--red); max-width: 100%; }
+    .msg.transcript-user { background: transparent; color: var(--text-dim); font-size: 12px; font-style: italic; max-width: 100%; padding: 2px 14px; border-left: 2px solid var(--border); }
+    .msg.transcript-ai   { background: transparent; color: var(--text-dim); font-size: 12px; font-style: italic; max-width: 88%; padding: 2px 14px; border-left: 2px solid var(--accent-dim); }
+    .msg-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin-bottom: 5px; }
+    .msg.user .msg-label { color: #a090e8; }
+    .msg.ai   .msg-label { color: var(--accent); }
+    .msg.ai.streaming::after { content: '▋'; animation: blink 1s step-end infinite; color: var(--accent); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ── Controls area ── */
+    .controls { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
+
+    /* Mic button — the primary control in Phase 5 */
+    .mic-row { display: flex; align-items: center; gap: 12px; justify-content: center; }
+    #mic-btn {
+      width: 72px; height: 72px; border-radius: 50%;
+      border: 3px solid var(--accent-dim);
+      background: var(--surface2);
+      color: var(--text); font-size: 28px; cursor: pointer;
+      transition: all .15s; display: flex; align-items: center; justify-content: center;
+      user-select: none; -webkit-user-select: none;
+      touch-action: none; /* prevents scroll on mobile long-press */
+    }
+    #mic-btn:hover:not(:disabled) { border-color: var(--accent); background: #2a2a4a; }
+    #mic-btn.recording { background: var(--red); border-color: var(--red); transform: scale(1.08); box-shadow: 0 0 0 8px rgba(239,83,80,.15); }
+    #mic-btn:disabled  { opacity: .4; cursor: not-allowed; }
+
+    .mic-hint { font-size: 12px; color: var(--text-dim); text-align: center; }
+
+    /* Text input row — secondary input method */
+    .text-row { display: flex; gap: 10px; }
+    #text-input {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--font);
+      font-size: 14px; padding: 10px 14px; outline: none; transition: border-color .2s;
+    }
+    #text-input:focus { border-color: var(--accent); }
+    #text-input::placeholder { color: var(--text-dim); }
+    #text-input:disabled { opacity: .5; cursor: not-allowed; }
+    #send-btn {
+      background: var(--accent); color: #fff; border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 500; padding: 10px 20px; cursor: pointer;
+      transition: background .2s, transform .1s;
+    }
+    #send-btn:hover:not(:disabled) { background: #6a5ce0; }
+    #send-btn:active:not(:disabled) { transform: scale(.97); }
+    #send-btn:disabled { background: var(--surface2); color: var(--text-dim); cursor: not-allowed; }
+
+    .divider { text-align: center; font-size: 11px; color: var(--text-dim); margin: 2px 0; }
+
+    /* ── Debug bar ── */
+    .debug { width: 100%; max-width: 720px; margin-top: 14px; font-size: 11px; color: var(--text-dim); font-family: monospace; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 12px; }
+    .debug strong { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Voice Commerce Agent</h1>
+  <p class="subtitle">Phase 5 — Full voice-to-voice · Hold mic button to speak</p>
+</div>
+
+<div class="top-bar">
+  <div class="status-pill">
+    <div class="dot" id="conn-dot"></div>
+    <span id="conn-text">Connecting...</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="mic-indicator" id="mic-ind">
+      <div class="mic-dot"></div>
+      <span>Recording</span>
+    </div>
+    <div class="audio-bars" id="audio-bars">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <div class="vol-row">Vol <input type="range" id="vol" min="0" max="1" step=".05" value=".9"></div>
+  </div>
+</div>
+
+<div class="phase-badge">Phase 5 · Voice-to-Voice</div>
+
+<div id="chat">
+  <div class="msg sys">
+    Hold the mic button (or Space) to speak. Release to let Gemini respond.
+    You can also type below. Barge-in: speak while Gemini is talking to interrupt.
+  </div>
+</div>
+
+<div class="controls">
+  <div class="mic-row">
+    <div>
+      <button id="mic-btn" disabled title="Hold to speak (or hold Space)">🎤</button>
+      <div class="mic-hint" id="mic-hint">Requesting mic permission...</div>
+    </div>
+  </div>
+
+  <div class="divider">— or type below —</div>
+
+  <div class="text-row">
+    <input id="text-input" type="text"
+      placeholder="Type a message... (e.g. 'show me running shoes')"
+      disabled autocomplete="off">
+    <button id="send-btn" disabled>Send</button>
+  </div>
+</div>
+
+<div class="debug">
+  <span><strong>WS:</strong> ws://localhost:8000/ws/voice</span>
+  <span><strong>Session:</strong> <span id="dbg-sid">—</span></span>
+  <span><strong>Capture:</strong> <span id="dbg-cap">—</span></span>
+  <span><strong>Playback:</strong> <span id="dbg-play">—</span></span>
+  <span><strong>Chunks sent:</strong> <span id="dbg-sent">0</span></span>
+  <span><strong>Chunks received:</strong> <span id="dbg-recv">0</span></span>
+  <span><strong>Turns:</strong> <span id="dbg-turns">0</span></span>
+</div>
+
+<!--
+  ============================================================
+  AUDIWORKLET PROCESSOR — inline as a Blob URL
+  ============================================================
+  WHY INLINE (not a separate .js file):
+    AudioWorklet processors must be loaded via audioCtx.audioWorklet.addModule(url).
+    Serving a separate file requires an extra HTTP request and correct MIME type.
+    By encoding the processor as a Blob URL, we avoid a separate file AND
+    the MIME type issue — everything stays in this single HTML file.
+
+  WHAT THE PROCESSOR DOES:
+    Runs on the dedicated audio thread (not the main JS thread).
+    Receives Float32 audio samples from the microphone in 128-sample blocks.
+    Accumulates them in a 4096-sample buffer.
+    When the buffer is full, converts Float32 → Int16 (PCM s16le) and
+    posts the raw bytes to the main thread via postMessage.
+    The main thread then sends them over WebSocket as binary frames.
+
+  Float32 → Int16 CONVERSION (reverse of playback conversion):
+    Playback:  Int16 / 32768.0 → Float32   (used in playChunk)
+    Capture:   Float32 * 32767  → Int16    (used in worklet processor)
+    The 32767 (not 32768) cap prevents the +32768 overflow that would wrap
+    to -32768 on a +1.0 float sample.
+-->
+<script id="worklet-src" type="text/plain">
+class PcmCaptureProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    // Chunk size: how many samples to accumulate before sending.
+    // 4096 samples at 16kHz = 256ms per chunk.
+    // Smaller = more WebSocket messages (overhead), smaller latency.
+    // Larger = fewer messages, higher latency before Gemini hears anything.
+    // 4096 is the sweet spot confirmed in tests.
+    this._chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4096;
+    this._buffer = new Float32Array(this._chunkSamples);
+    this._bufferIdx = 0;
+    this._active = false;
+  }
+
+  process(inputs) {
+    // inputs[0][0] = Float32Array of 128 samples from the microphone.
+    // The Web Audio API always delivers in 128-sample blocks regardless
+    // of our output chunk size. We accumulate into _buffer until full.
+    if (!this._active) return true; // Processor stays alive but silent
+
+    const input = inputs[0][0];
+    if (!input) return true;
+
+    for (let i = 0; i < input.length; i++) {
+      this._buffer[this._bufferIdx++] = input[i];
+
+      if (this._bufferIdx >= this._chunkSamples) {
+        // Buffer full — convert Float32 → Int16 and send to main thread
+        const int16 = new Int16Array(this._chunkSamples);
+        for (let j = 0; j < this._chunkSamples; j++) {
+          // Clamp to [-1.0, 1.0] then scale to int16 range.
+          // Math.max/min clamp prevents values outside ±1.0 from wrapping.
+          const clamped = Math.max(-1, Math.min(1, this._buffer[j]));
+          int16[j] = clamped < 0
+            ? clamped * 32768   // negative: multiply by 32768
+            : clamped * 32767;  // positive: multiply by 32767 (avoids +32768 overflow)
+        }
+        // Transfer the ArrayBuffer to main thread (zero-copy — no clone)
+        this.port.postMessage({ type: 'chunk', buffer: int16.buffer }, [int16.buffer]);
+        this._bufferIdx = 0;
+      }
+    }
+    return true; // Must return true to keep processor alive
+  }
+}
+
+// The globalThis.currentFrame and sampleRate are available in AudioWorklet scope.
+// Expose the processor class to the AudioWorklet registry by this name.
+registerProcessor('pcm-capture-processor', PcmCaptureProcessor);
+</script>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let ws = null;
+
+// PLAYBACK AudioContext — created when audio_config arrives (24kHz)
+let playCtx = null;
+let gainNode = null;
+let nextStartAt = 0;
+let recvChunks = 0;
+
+// CAPTURE AudioContext — created when mic_config arrives (16kHz)
+let captureCtx = null;
+let workletNode = null;
+let micStream = null;
+let isRecording = false;
+let sentChunks = 0;
+
+// Session
+let sessionId = (() => {
+  let id = sessionStorage.getItem('vca5_sid');
+  if (!id) { id = 'v5_' + Math.random().toString(36).slice(2,10); sessionStorage.setItem('vca5_sid', id); }
+  return id;
+})();
+let turnCount = 0;
+let currentAiEl = null;
+
+document.getElementById('dbg-sid').textContent = sessionId.slice(0,12) + '...';
+
+// ============================================================
+// PLAYBACK ENGINE  (server → browser audio)
+// ============================================================
+// Same gapless scheduling as Phase 4. Initialised from audio_config.
+
+function initPlayback(sr) {
+  if (playCtx && playCtx.sampleRate === sr) return;
+  if (playCtx) playCtx.close();
+  playCtx = new AudioContext({ sampleRate: sr });
+  gainNode = playCtx.createGain();
+  gainNode.gain.value = parseFloat(document.getElementById('vol').value);
+  gainNode.connect(playCtx.destination);
+  nextStartAt = 0;
+  document.getElementById('dbg-play').textContent = `PCM s16le @ ${sr}Hz`;
+}
+
+document.getElementById('vol').addEventListener('input', function() {
+  if (gainNode) gainNode.gain.setTargetAtTime(parseFloat(this.value), playCtx.currentTime, 0.015);
+});
+
+async function playChunk(buf) {
+  if (!playCtx) return;
+  if (playCtx.state === 'suspended') await playCtx.resume();
+
+  const pcm = new Int16Array(buf);
+  const f32 = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) f32[i] = pcm[i] / 32768.0;
+
+  const ab = playCtx.createBuffer(1, f32.length, playCtx.sampleRate);
+  ab.getChannelData(0).set(f32);
+
+  const src = playCtx.createBufferSource();
+  src.buffer = ab;
+  src.connect(gainNode);
+
+  const now = playCtx.currentTime;
+  const at = Math.max(now, nextStartAt);
+  src.start(at);
+  nextStartAt = at + ab.duration;
+
+  recvChunks++;
+  document.getElementById('dbg-recv').textContent = recvChunks;
+  document.getElementById('audio-bars').classList.add('active');
+  src.onended = () => {
+    if (playCtx.currentTime >= nextStartAt - 0.05) {
+      document.getElementById('audio-bars').classList.remove('active');
+    }
+  };
+}
+
+// ============================================================
+// MICROPHONE CAPTURE ENGINE  (browser → server audio)
+// ============================================================
+
+/**
+ * Request microphone access and set up the AudioWorklet capture pipeline.
+ *
+ * PIPELINE:
+ *   getUserMedia() → MediaStream
+ *     → createMediaStreamSource(stream)
+ *     → AudioWorkletNode('pcm-capture-processor')
+ *     → messages of Int16 PCM chunks → WebSocket binary frames
+ *
+ * WHY NOT connect workletNode to captureCtx.destination:
+ *   We don't want to hear our own microphone through the speakers (feedback!).
+ *   The worklet only needs to receive audio — it doesn't need to output anything.
+ *   So we deliberately do NOT connect the worklet's output to destination.
+ *
+ * @param {number} sampleRate - from mic_config (16000)
+ */
+async function initCapture(sampleRate) {
+  if (captureCtx && captureCtx.sampleRate === sampleRate) {
+    return; // Already initialised at the right rate
+  }
+
+  // Build the AudioWorklet processor from the inline script tag as a Blob URL.
+  // WHY BLOB URL: AudioWorklet.addModule() requires a URL, not inline code.
+  // Blob URLs are created from in-memory data — no server request needed.
+  const workletCode = document.getElementById('worklet-src').textContent;
+  const blob = new Blob([workletCode], { type: 'application/javascript' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  // Create a NEW AudioContext at the capture sample rate (16kHz).
+  // CANNOT reuse playCtx — it's at 24kHz. Web Audio API does not resample
+  // within a context, so we need a separate context for each sample rate.
+  if (captureCtx) await captureCtx.close();
+  captureCtx = new AudioContext({ sampleRate });
+
+  // Register the worklet processor class in this AudioContext's worklet scope
+  await captureCtx.audioWorklet.addModule(blobUrl);
+  URL.revokeObjectURL(blobUrl); // Clean up the Blob URL — processor is registered
+
+  document.getElementById('dbg-cap').textContent = `PCM s16le @ ${sampleRate}Hz`;
+  document.getElementById('mic-btn').disabled = false;
+  document.getElementById('mic-hint').textContent = 'Hold to speak (or hold Space)';
+}
+
+/**
+ * Start microphone capture and stream audio to the server.
+ * Called when the user presses and holds the mic button.
+ */
+async function startRecording() {
+  if (isRecording) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!captureCtx) return;
+
+  // getUserMedia() shows the browser's permission dialog on first call.
+  // Subsequent calls reuse the previously granted permission.
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        // These constraints improve speech quality and reduce background noise.
+        // All are "hints" — the browser may ignore some on certain devices.
+        sampleRate: captureCtx.sampleRate,  // Request the right rate
+        channelCount: 1,                     // Mono
+        echoCancellation: true,              // Removes Gemini's audio from mic
+        noiseSuppression: true,              // Reduces keyboard/background noise
+        autoGainControl: true,               // Normalises quiet voices
+      }
+    });
+  } catch (err) {
+    addMsg('err', `Microphone error: ${err.message}. Check browser permissions.`);
+    document.getElementById('mic-hint').textContent = 'Mic permission denied';
+    return;
+  }
+
+  micStream = stream;
+
+  // Resume AudioContext if suspended (browser autoplay policy)
+  if (captureCtx.state === 'suspended') await captureCtx.resume();
+
+  // Connect: microphone → worklet processor
+  const source = captureCtx.createMediaStreamSource(micStream);
+  workletNode = new AudioWorkletNode(captureCtx, 'pcm-capture-processor', {
+    processorOptions: { chunkSamples: 4096 }
+    // 4096 samples at 16kHz = 256ms per chunk — good balance of
+    // latency vs WebSocket message overhead.
+  });
+
+  // When the worklet has accumulated a chunk, send it over WebSocket
+  workletNode.port.onmessage = (e) => {
+    if (e.data.type === 'chunk' && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(e.data.buffer); // Send ArrayBuffer as binary WebSocket frame
+      sentChunks++;
+      document.getElementById('dbg-sent').textContent = sentChunks;
+    }
+  };
+
+  // Connect source → worklet (but NOT worklet → destination — no feedback)
+  source.connect(workletNode);
+
+  isRecording = true;
+  document.getElementById('mic-btn').classList.add('recording');
+  document.getElementById('mic-btn').title = 'Recording... release to stop';
+  document.getElementById('mic-ind').classList.add('active');
+
+  // Resume playback context too (in case it was suspended)
+  if (playCtx && playCtx.state === 'suspended') playCtx.resume();
+}
+
+/**
+ * Stop microphone capture.
+ * Called when the user releases the mic button.
+ */
+function stopRecording() {
+  if (!isRecording) return;
+
+  // Disconnect and clean up the worklet
+  if (workletNode) {
+    workletNode.port.onmessage = null;
+    workletNode.disconnect();
+    workletNode = null;
+  }
+
+  // Stop all mic tracks (releases the browser's mic indicator — the red dot)
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }
+
+  isRecording = false;
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('mic-btn').title = 'Hold to speak (or hold Space)';
+  document.getElementById('mic-ind').classList.remove('active');
+}
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+function connect() {
+  setConn('connecting', 'Connecting...');
+  ws = new WebSocket(`ws://localhost:8000/ws/voice?session_id=${sessionId}`);
+
+  ws.onopen = () => {
+    setConn('connected', 'Connected');
+    addMsg('sys', 'Connected. Opening AI session...');
+  };
+
+  ws.onmessage = async (e) => {
+    if (e.data instanceof Blob) {
+      await playChunk(await e.data.arrayBuffer());
+    } else if (e.data instanceof ArrayBuffer) {
+      await playChunk(e.data);
+    } else {
+      handleMsg(e.data);
+    }
+  };
+
+  ws.onclose = (ev) => {
+    setConn('disconnected', `Disconnected (${ev.code}). Reconnecting...`);
+    stopRecording();
+    nextStartAt = 0;
+    document.getElementById('audio-bars').classList.remove('active');
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => addMsg('err', 'WebSocket error — is the server running?');
+}
+
+function handleMsg(raw) {
+  let m;
+  try { m = JSON.parse(raw); } catch { addMsg('ai', raw); return; }
+
+  switch (m.type) {
+    case 'audio_config':
+      // Output playback config — create 24kHz AudioContext for playing Gemini's voice
+      initPlayback(m.sample_rate);
+      break;
+
+    case 'mic_config':
+      // Input capture config — create 16kHz AudioContext + AudioWorklet for mic
+      initCapture(m.sample_rate).catch(err =>
+        addMsg('err', `Mic setup error: ${err.message}`)
+      );
+      break;
+
+    case 'text':
+      appendToAi(m.text);
+      break;
+
+    case 'transcript':
+      // Speaker: "ai" or "user"
+      // Shown as italic subtitle lines above the full message
+      if (m.speaker === 'user') {
+        // What Gemini heard the user say — appears immediately when Gemini processes speech
+        addMsg('transcript-user', `You: "${m.text}"`);
+      } else {
+        // What Gemini is saying — accumulates as it speaks
+        appendToAi(m.text);
+      }
+      break;
+
+    case 'status':
+      handleStatus(m.status, m.message);
+      break;
+
+    case 'error':
+      addMsg('err', `Error: ${m.message}`);
+      setInputEnabled(true);
+      break;
+
+    case 'action':
+      console.debug('Action:', m);
+      addMsg('sys', `[Action: ${m.action || JSON.stringify(m)}]`);
+      break;
+  }
+}
+
+function handleStatus(s, msg) {
+  if (s === 'thinking') {
+    setInputEnabled(false);
+    if (msg) addMsg('sys', `⟳ ${msg}`);
+  } else if (s === 'done' || s === 'ready') {
+    if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
+    nextStartAt = 0;
+    setInputEnabled(true);
+    if (s === 'done') document.getElementById('dbg-turns').textContent = ++turnCount;
+    if (msg && s === 'ready') addMsg('sys', `✓ ${msg}`);
+  } else if (s === 'error') {
+    setInputEnabled(true);
+    if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
+  }
+}
+
+// ============================================================
+// TEXT INPUT (secondary — alongside mic)
+// ============================================================
+
+function sendText() {
+  const inp = document.getElementById('text-input');
+  const text = inp.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  addMsg('user', text);
+  inp.value = '';
+  currentAiEl = null;
+  setInputEnabled(false);
+  if (playCtx && playCtx.state === 'suspended') playCtx.resume();
+  ws.send(JSON.stringify({ type: 'text', text }));
+}
+
+// ============================================================
+// MIC BUTTON — mouse, touch, and keyboard
+// ============================================================
+
+const micBtn = document.getElementById('mic-btn');
+
+// Mouse events — desktop
+micBtn.addEventListener('mousedown', e => { e.preventDefault(); startRecording(); });
+micBtn.addEventListener('mouseup',   () => stopRecording());
+micBtn.addEventListener('mouseleave',() => { if (isRecording) stopRecording(); });
+
+// Touch events — mobile
+micBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); }, { passive: false });
+micBtn.addEventListener('touchend',   e => { e.preventDefault(); stopRecording(); }, { passive: false });
+
+// Space key — hold Space = hold mic button
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !e.repeat && document.activeElement !== document.getElementById('text-input')) {
+    e.preventDefault();
+    startRecording();
+  }
+});
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space' && document.activeElement !== document.getElementById('text-input')) {
+    e.preventDefault();
+    stopRecording();
+  }
+});
+
+// Text input events
+document.getElementById('text-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey && !this.disabled) { e.preventDefault(); sendText(); }
+});
+document.getElementById('send-btn').addEventListener('click', sendText);
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+
+function appendToAi(text) {
+  if (!currentAiEl) {
+    currentAiEl = document.createElement('div');
+    currentAiEl.className = 'msg ai streaming';
+    const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = 'Assistant';
+    const body = document.createElement('div'); body.className = 'msg-body';
+    currentAiEl.appendChild(lbl); currentAiEl.appendChild(body);
+    document.getElementById('chat').appendChild(currentAiEl);
+  }
+  currentAiEl.querySelector('.msg-body').textContent += text;
+  scrollBottom();
+}
+
+function addMsg(type, text) {
+  const chat = document.getElementById('chat');
+  const el = document.createElement('div');
+  el.className = 'msg ' + type;
+  if (type === 'user') {
+    const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = 'You'; el.appendChild(lbl);
+  }
+  const body = document.createElement('div'); body.className = 'msg-body'; body.textContent = text; el.appendChild(body);
+  chat.appendChild(el);
+  scrollBottom();
+}
+
+function scrollBottom() { const c = document.getElementById('chat'); c.scrollTop = c.scrollHeight; }
+
+function setInputEnabled(on) {
+  document.getElementById('text-input').disabled = !on;
+  document.getElementById('send-btn').disabled = !on;
+  // Never disable the mic button — barge-in must always work
+}
+
+function setConn(state, text) {
+  document.getElementById('conn-dot').className = 'dot ' + state;
+  document.getElementById('conn-text').textContent = text;
+}
+
+// ============================================================
+// START
+// ============================================================
+connect();
+</script>
+</body>
+</html>

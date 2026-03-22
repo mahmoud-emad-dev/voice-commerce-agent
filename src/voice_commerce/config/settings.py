@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-    
+    gemini_voice_name: str = "Charon"
     
     log_level: str = "INFO"
     app_debug: bool = True

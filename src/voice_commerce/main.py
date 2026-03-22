@@ -12,13 +12,16 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from typing import Any
 import logging
+import os
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 
 from voice_commerce.config.settings import settings
-from voice_commerce.api.routes import health
+from voice_commerce.api.routes import health , voice
 log = structlog.get_logger(__name__)
 
 
@@ -85,6 +88,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
         docs_url="/docs" if settings.app_debug else None,
+        redoc_url="/redoc" if settings.app_debug else None,
     )
 
     # CORS Middleware
@@ -109,6 +113,16 @@ def create_app() -> FastAPI:
         }
     # Register other routes
     app.include_router(health.router ,tags=["system"])
+    app.include_router(voice.router, prefix="/ws", tags=["voice"])
+
+
+
+
+    static_dir = "static"
+    if os.path.exists(static_dir):
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+ 
+
     return app
 
 

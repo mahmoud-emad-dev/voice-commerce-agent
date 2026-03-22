@@ -1,0 +1,330 @@
+from __future__ import annotations
+import time
+import json
+from typing import Any
+import asyncio
+
+import structlog
+from fastapi import WebSocket, WebSocketDisconnect
+
+from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler 
+
+
+log = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Protocol constants — all WebSocket message type strings in one place
+# ---------------------------------------------------------------------------
+MSG_TEXT        = "text"
+MSG_AUDIO       = "audio"
+MSG_TRANSCRIPT  = "transcript"
+MSG_ACTION      = "action"
+MSG_STATUS      = "status"
+MSG_ERROR       = "error"
+MSG_AUDIO_CFG   = "audio_config"
+MSG_MIC_CONFIG  = "mic_config"   # New in Phase 5: tells browser mic parameters
+ 
+STATUS_THINKING   = "thinking"
+STATUS_RESPONDING = "responding"
+STATUS_DONE       = "done"
+STATUS_READY      = "ready"
+STATUS_ERROR      = "error"
+
+
+class VoiceWebSocketHandler:
+    """
+    Manages one WebSocket session from one browser client.
+ 
+    One instance per connection. Two concurrent async tasks run inside
+    handle() for the lifetime of the connection.
+ 
+    Instance attributes set in __init__:
+        session_id    — unique ID for logging and cart isolation
+        _transcript   — growing list of {role, text} dicts (persisted in Phase 11)
+        _websocket    — set in handle(), used by helper send methods
+        _gemini       — set in handle(), used by _browser_to_gemini_task
+        _input_mode   — "text" or "audio"; switches when browser sends binary
+    """
+
+    def __init__(self, session_id: str | None = None) -> None:
+
+        self.session_id = session_id or f"sess_{int(time.time() * 1000)}"
+        self._transcript: list[dict[str, str]] = []
+        self.websocket: WebSocket | None = None
+        self._gemini: GeminiLiveHandler | None = None
+        self._input_mode: str = "text"
+
+        log.info("voice_handler_created", session_id=self.session_id)
+
+
+    async def handle(self, websocket: WebSocket) -> None:
+
+        await websocket.accept()
+        self._websocket = websocket
+        log.info("ws_connected", session_id=self.session_id,
+                 client=str(websocket.client))
+        
+        # 1. Send audio output config so browser creates AudioContext at 24kHz
+        await self._send_json({"type": MSG_AUDIO_CFG, **self.get_browser_audio_config()})
+        
+        # 2. Send microphone capture config so browser knows what rate to capture
+        #    The browser's AudioWorklet must capture at exactly this rate.
+        await self._send_json({
+            "type": MSG_MIC_CONFIG,
+            "sample_rate": 16000,  # 16000
+            # "sample_rate": GEMINI_INPUT_SAMPLE_RATE,  # 16000
+            "bit_depth": 16,
+            "channels": 1,
+            "encoding": "pcm_s16le",
+            # WHY SEND THIS:
+            #   Hardcoding 16000 in JavaScript is fragile — it must match
+            #   GEMINI_INPUT_SAMPLE_RATE exactly. Sending it from Python means
+            #   one source of truth. If Google changes the required input rate,
+            #   we change audio_processor.py and the browser auto-adapts.
+        })
+
+
+        await self._send_status(STATUS_THINKING, "Opening AI session...")
+
+        try:
+            async with GeminiLiveHandler() as gemini:
+                self._gemini = gemini
+                await self._send_status(STATUS_READY, "Ready — speak or type")
+
+                # Run both tasks concurrently until one finishes/fails.
+                # gather() propagates the first exception to the caller.
+                # return_exceptions=False means the first exception cancels both.
+                await asyncio.gather(
+                    self._browser_to_gemini_task(websocket, gemini),
+                    self._gemini_to_browser_task(websocket, gemini),
+                    return_exceptions=False,  # Propagate exceptions immediately
+                
+
+                )
+
+        except WebSocketDisconnect:
+            log.info("ws_disconnected_normally", session_id=self.session_id,
+                     turns=len(self._transcript))
+ 
+        except Exception as exc:
+                log.error("ws_handler_error", session_id=self.session_id,
+                        error=str(exc), error_type=type(exc).__name__, exc_info=True)
+                try:
+                    await self._send_error(str(exc))
+                except Exception:
+                    pass  # WebSocket is already gone
+
+        finally:
+            self._gemini = None
+            log.info("ws_handler_finished", session_id=self.session_id,total_turns=len(self._transcript))
+
+
+
+
+    async def _browser_to_gemini_task(self ,websocket: WebSocket,
+        gemini: GeminiLiveHandler) -> None:
+        """Continuously receive messages from the browser and send to Gemini."""
+        while True:
+            message = await websocket.receive()
+
+            if message["type"] == "websocket.disconnect":
+                # Browser closed the connection cleanly
+                raise WebSocketDisconnect(code=message.get("code", 1000))
+
+            raw_bytes: bytes | None = message.get("bytes")
+            raw_text:  str   | None = message.get("text")
+
+
+            if raw_bytes is not None:
+
+                if self._input_mode == "text":
+                    # First audio chunk — switch to audio mode and log it
+                    self._input_mode = "audio"
+                    log.info("input_mode_switched_to_audio",
+                             session_id=self.session_id)
+            
+                # Skip tiny chunks (browser may send near-silence)
+                if len(raw_bytes) < 32:
+                    continue   
+
+                log.debug("mic_chunk_received",bytes=len(raw_bytes),session_id=self.session_id)
+
+                # await gemini.send_audio_chunk(raw_bytes)
+
+            elif raw_text is not None:
+                # ── TEXT FRAME = typed message or control JSON ─────────────
+                user_text = self._parse_text_message(raw_text)
+
+                if not user_text.strip():
+                    continue
+
+                self._input_mode = "text"
+                log.info("text_message_received",
+                         preview=user_text[:80],
+                         session_id=self.session_id)
+                
+                self._transcript.append({"role": "user", "text": user_text})
+                # Signal browser: AI is processing
+                await self._send_status(STATUS_THINKING)
+                await gemini.send_text(user_text)
+
+
+            
+
+    async def _gemini_to_browser_task(self,websocket: WebSocket, gemini: GeminiLiveHandler) -> None:
+               
+        """
+            Task B: Receives events from Gemini and forwards to the browser.
+    
+            Runs forever until the Gemini session closes or an exception occurs.
+    
+            WHY A SEPARATE ONGOING TASK (not inside the text/audio send loop):
+                In voice mode, Gemini's response can start arriving WHILE the
+                user is still sending mic audio. A serial approach would buffer
+                all incoming browser data first, then check for Gemini output —
+                introducing latency and preventing barge-in.
+    
+                As a separate task, the event loop switches to this task at
+                every `await` point inside gemini.receive_events() — including
+                while task_A is blocked waiting for the next browser message.
+    
+            THE RECEIVE LOOP:
+                gemini.receive_events() is an async generator that yields events
+                indefinitely. Unlike Phase 2-4 where we `break` on turn_complete,
+                in voice mode we keep receiving because the next turn starts
+                automatically when Gemini detects the user speaking again.
+                turn_complete just means "I finished THIS response" — we keep
+                    looping to receive the NEXT response.
+        """
+        ai_transcript_parts: list[str] = []
+        async for event in gemini.receive_events():
+            event_type = event.get("type")
+
+            # ── AUDIO CHUNK ────────────────────────────────────────────────
+            if event_type == MSG_AUDIO:
+                audio_bytes: bytes = event["data"]
+
+                # if is_valid_audio_chunk(audio_bytes):
+                await websocket.send_bytes(audio_bytes)
+
+            # ── OUTPUT TRANSCRIPT (what Gemini SAID) ──────────────────────
+            elif event_type == "output_transcript":
+                transcript_text: str = event["text"]
+                ai_transcript_parts.append(transcript_text)
+                # Send the growing transcript to the browser (for live captioning)
+                await self._send_json({
+                    "type": MSG_TRANSCRIPT,
+                    "role": "ai",
+                    "text": transcript_text
+                })
+            # ── INPUT TRANSCRIPT (what USER SAID) ─────────────────────────
+            elif event_type == "input_transcript":
+                user_transcript_text: str = event["text"]
+                log.info("user_speech_transcribed",
+                         text=user_transcript_text[:80],
+                         session_id=self.session_id)
+                self._transcript.append({"role": "user", "text": user_transcript_text})
+                # Send the growing transcript to the browser (for live captioning)
+                await self._send_json({
+                    "type": MSG_TRANSCRIPT,
+                    "role": "user",
+                    "text": user_transcript_text
+                })
+
+            # ── TEXT CHUNK (rare in audio mode) ───────────────────────────
+            elif event_type == MSG_TEXT:
+                await self._send_json({
+                    "type": MSG_TEXT,
+                    "text": event["text"],
+                })
+
+            # ── TOOL CALL ─────────────────────────────────────────────────
+            elif event_type == "tool_call":
+                tool_name = event.get("name", "")
+                tool_args  = event.get("args", {})
+                call_id    = event.get("call_id")
+                log.info("tool_call_received",
+                         tool=tool_name, session=self.session_id)
+
+
+            # ── TURN COMPLETE ──────────────────────────────────────────────
+            elif event_type == "turn_complete":
+                # One AI response turn finished.
+                # In voice mode: DON'T break — keep looping for the next turn.
+                # Save completed transcript, reset status, re-enable UI.
+                if ai_transcript_parts:
+                    full_response = "".join(ai_transcript_parts)
+                    self._transcript.append({"role": "ai", "text": full_response})
+                    ai_transcript_parts.clear()
+
+                    log.debug("turn_saved", length=len(full_response),
+                              session=self.session_id)
+                    
+                await self._send_status(STATUS_DONE)
+
+
+            # ── ERROR ─────────────────────────────────────────────────────
+            elif event_type == MSG_ERROR:
+                error_message: str = event.get("message", "Unknown Gemini error")
+                log.error("gemini_error",  error=error_message, session=self.session_id)
+                await self._send_error(f"AI error: {error_message}")
+                
+
+
+
+        
+        
+
+    # =========================================================================
+    # HELPER METHODS
+    # =========================================================================
+
+    def get_browser_audio_config(self) -> dict[str, Any]:
+        """Returns the standard Gemini audio output configuration."""
+        return {
+            "sample_rate": 24000,
+            "response_modality": "audio"
+        }
+
+    def _parse_text_message(self,raw_text: str) -> str:
+        """
+        Extract user text from a raw WebSocket text frame.
+ 
+        Accepts both:
+          Plain string:  "show me shoes"
+          JSON object:   {"type": "text", "text": "show me shoes"}
+        """
+        try:
+            parsed_data = json.loads(raw_text)
+            if isinstance(parsed_data, dict) :
+                user_text = parsed_data.get("text", "")
+                log.debug("text_message_parsed_as_json", text=user_text[:80])
+                return user_text
+            if isinstance(parsed_data, str):
+                log.debug("text_message_parsed_as_plain_string", text=parsed_data[:80])
+                return parsed_data
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return raw_text 
+
+
+
+
+    async def _send_json(self, payload: dict) -> None:
+        """Helper to send JSON messages to the browser."""
+        if self._websocket:
+            await self._websocket.send_text(json.dumps(payload))
+            
+
+    async def _send_status(self, status: str, message: str = "") -> None:
+        """Helper to send status messages to the browser."""
+        payload : dict[str , Any] = {"type": MSG_STATUS, "status": status}
+        if message:
+            payload["message"] = message
+        await self._send_json(payload)
+        
+
+    async def _send_error(self, message: str) -> None:
+        """Helper to send error messages to the browser."""
+        await self._send_json({"type": MSG_ERROR, "message": message})
+        
