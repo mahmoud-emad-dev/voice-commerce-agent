@@ -51,7 +51,7 @@ class VoiceWebSocketHandler:
 
         self.session_id = session_id or f"sess_{int(time.time() * 1000)}"
         self._transcript: list[dict[str, str]] = []
-        self.websocket: WebSocket | None = None
+        self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
 
@@ -258,6 +258,16 @@ class VoiceWebSocketHandler:
                 await self._send_status(STATUS_DONE)
 
 
+            # ── SESSION CLOSED (Gemini ended the connection) ───────────────
+            elif event_type == "session_closed":
+                # FIX: was unhandled — event silently dropped and browser never
+                # learned the session ended. Now we notify and stop the task.
+                reason = event.get("reason", "unknown")
+                log.info("gemini_session_closed_gracefully",
+                         reason=reason, session=self.session_id)
+                await self._send_status(STATUS_ERROR, "AI session closed — reconnecting...")
+                return  # Stop task; outer handle() will let WebSocket close naturally
+            
             # ── ERROR ─────────────────────────────────────────────────────
             elif event_type == MSG_ERROR:
                 error_message: str = event.get("message", "Unknown Gemini error")

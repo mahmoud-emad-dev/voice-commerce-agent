@@ -247,7 +247,10 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this._chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4096;
     this._buffer = new Float32Array(this._chunkSamples);
     this._bufferIdx = 0;
-    this._active = false;
+    // FIX: was false — processor was permanently silenced.
+    // The AudioWorkletNode itself is only created when recording starts,
+    // so the connection acts as the on/off gate; _active must start true.
+    this._active = true;
   }
 
   process(inputs) {
@@ -302,6 +305,7 @@ let recvChunks = 0;
 // CAPTURE AudioContext — created when mic_config arrives (16kHz)
 let captureCtx = null;
 let workletNode = null;
+let micSource = null;   // FIX: store source node so stopRecording can disconnect it
 let micStream = null;
 let isRecording = false;
 let sentChunks = 0;
@@ -451,6 +455,7 @@ async function startRecording() {
 
   // Connect: microphone → worklet processor
   const source = captureCtx.createMediaStreamSource(micStream);
+  micSource = source;   // FIX: store so stopRecording can disconnect it
   workletNode = new AudioWorkletNode(captureCtx, 'pcm-capture-processor', {
     processorOptions: { chunkSamples: 4096 }
     // 4096 samples at 16kHz = 256ms per chunk — good balance of
@@ -490,6 +495,13 @@ function stopRecording() {
     workletNode.port.onmessage = null;
     workletNode.disconnect();
     workletNode = null;
+  }
+
+  // FIX: also disconnect the source node (previously leaked — stayed connected
+  // to the (now-silent) worklet, accumulating orphaned nodes each press)
+  if (micSource) {
+    micSource.disconnect();
+    micSource = null;
   }
 
   // Stop all mic tracks (releases the browser's mic indicator — the red dot)
@@ -560,9 +572,8 @@ function handleMsg(raw) {
       break;
 
     case 'transcript':
-      // Speaker: "ai" or "user"
-      // Shown as italic subtitle lines above the full message
-      if (m.speaker === 'user') {
+      // FIX: server sends m.role ("user"/"ai"), not m.speaker (was always undefined)
+      if (m.role === 'user') {
         // What Gemini heard the user say — appears immediately when Gemini processes speech
         addMsg('transcript-user', `You: "${m.text}"`);
       } else {

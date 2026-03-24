@@ -62,7 +62,7 @@ class GeminiLiveHandler:
     
     def _build_system_prompt(self) -> str:
         """The 'Rules' the AI must follow."""
-        return "You are a friendly Voice Shopping Assistant. Keep answers short."   
+        return "You are a friendly Voice Shopping Assistant. Keep answers short.ALWAYS respond in English only"   
     
 
     async def send_text(self, text: str) -> None:
