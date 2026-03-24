@@ -154,7 +154,7 @@
 
 <div class="header">
   <h1>Voice Commerce Agent</h1>
-  <p class="subtitle">Phase 5 — Full voice-to-voice · Hold mic button to speak</p>
+  <p class="subtitle">Phase 5 — Full voice-to-voice · Click mic to start/stop speaking</p>
 </div>
 
 <div class="top-bar">
@@ -178,15 +178,15 @@
 
 <div id="chat">
   <div class="msg sys">
-    Hold the mic button (or Space) to speak. Release to let Gemini respond.
-    You can also type below. Barge-in: speak while Gemini is talking to interrupt.
+    Click the mic button (or press Space) to start speaking. Click again to stop and let the assistant respond.
+    You can also type below at any time.
   </div>
 </div>
 
 <div class="controls">
   <div class="mic-row">
     <div>
-      <button id="mic-btn" disabled title="Hold to speak (or hold Space)">🎤</button>
+      <button id="mic-btn" disabled title="Click to speak (or press Space)">🎤</button>
       <div class="mic-hint" id="mic-hint">Requesting mic permission...</div>
     </div>
   </div>
@@ -247,10 +247,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this._chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4096;
     this._buffer = new Float32Array(this._chunkSamples);
     this._bufferIdx = 0;
-    // FIX: was false — processor was permanently silenced.
-    // The AudioWorkletNode itself is only created when recording starts,
-    // so the connection acts as the on/off gate; _active must start true.
-    this._active = true;
+    this._active = true;  // FIX: was false — processor permanently silenced all mic audio
   }
 
   process(inputs) {
@@ -305,7 +302,6 @@ let recvChunks = 0;
 // CAPTURE AudioContext — created when mic_config arrives (16kHz)
 let captureCtx = null;
 let workletNode = null;
-let micSource = null;   // FIX: store source node so stopRecording can disconnect it
 let micStream = null;
 let isRecording = false;
 let sentChunks = 0;
@@ -318,6 +314,9 @@ let sessionId = (() => {
 })();
 let turnCount = 0;
 let currentAiEl = null;
+// Accumulates input_transcript fragments into one bubble per user turn
+// instead of creating a new div per word (the old fragmented behaviour)
+let currentUserTranscriptEl = null;
 
 document.getElementById('dbg-sid').textContent = sessionId.slice(0,12) + '...';
 
@@ -415,7 +414,7 @@ async function initCapture(sampleRate) {
 
   document.getElementById('dbg-cap').textContent = `PCM s16le @ ${sampleRate}Hz`;
   document.getElementById('mic-btn').disabled = false;
-  document.getElementById('mic-hint').textContent = 'Hold to speak (or hold Space)';
+  document.getElementById('mic-hint').textContent = 'Click to start speaking (or press Space)';
 }
 
 /**
@@ -455,7 +454,6 @@ async function startRecording() {
 
   // Connect: microphone → worklet processor
   const source = captureCtx.createMediaStreamSource(micStream);
-  micSource = source;   // FIX: store so stopRecording can disconnect it
   workletNode = new AudioWorkletNode(captureCtx, 'pcm-capture-processor', {
     processorOptions: { chunkSamples: 4096 }
     // 4096 samples at 16kHz = 256ms per chunk — good balance of
@@ -476,7 +474,7 @@ async function startRecording() {
 
   isRecording = true;
   document.getElementById('mic-btn').classList.add('recording');
-  document.getElementById('mic-btn').title = 'Recording... release to stop';
+  document.getElementById('mic-btn').title = 'Click to stop recording';
   document.getElementById('mic-ind').classList.add('active');
 
   // Resume playback context too (in case it was suspended)
@@ -497,13 +495,6 @@ function stopRecording() {
     workletNode = null;
   }
 
-  // FIX: also disconnect the source node (previously leaked — stayed connected
-  // to the (now-silent) worklet, accumulating orphaned nodes each press)
-  if (micSource) {
-    micSource.disconnect();
-    micSource = null;
-  }
-
   // Stop all mic tracks (releases the browser's mic indicator — the red dot)
   if (micStream) {
     micStream.getTracks().forEach(t => t.stop());
@@ -512,7 +503,7 @@ function stopRecording() {
 
   isRecording = false;
   document.getElementById('mic-btn').classList.remove('recording');
-  document.getElementById('mic-btn').title = 'Hold to speak (or hold Space)';
+  document.getElementById('mic-btn').title = 'Click to speak (or press Space)';
   document.getElementById('mic-ind').classList.remove('active');
 }
 
@@ -572,12 +563,25 @@ function handleMsg(raw) {
       break;
 
     case 'transcript':
-      // FIX: server sends m.role ("user"/"ai"), not m.speaker (was always undefined)
+      // Server sends m.role ("user"/"ai"), not m.speaker
       if (m.role === 'user') {
-        // What Gemini heard the user say — appears immediately when Gemini processes speech
-        addMsg('transcript-user', `You: "${m.text}"`);
+        // Accumulate fragments into ONE updating bubble per user turn.
+        // Previously a new div was created per word → wall of "You: ' uh'"
+        if (!currentUserTranscriptEl) {
+          currentUserTranscriptEl = document.createElement('div');
+          currentUserTranscriptEl.className = 'msg transcript-user';
+          const body = document.createElement('div');
+          body.className = 'msg-body';
+          body.textContent = 'You: "' + m.text.trim();
+          currentUserTranscriptEl.appendChild(body);
+          document.getElementById('chat').appendChild(currentUserTranscriptEl);
+          scrollBottom();
+        } else {
+          currentUserTranscriptEl.querySelector('.msg-body').textContent += m.text;
+          scrollBottom();
+        }
       } else {
-        // What Gemini is saying — accumulates as it speaks
+        // AI output transcript — append to current AI bubble
         appendToAi(m.text);
       }
       break;
@@ -604,6 +608,12 @@ function handleStatus(s, msg) {
     if (msg) addMsg('sys', `⟳ ${msg}`);
   } else if (s === 'done' || s === 'ready') {
     if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
+    // Close the user transcript bubble (add closing quote) and reset for next turn
+    if (currentUserTranscriptEl) {
+      const body = currentUserTranscriptEl.querySelector('.msg-body');
+      if (!body.textContent.endsWith('"')) body.textContent += '"';
+      currentUserTranscriptEl = null;
+    }
     nextStartAt = 0;
     setInputEnabled(true);
     if (s === 'done') document.getElementById('dbg-turns').textContent = ++turnCount;
@@ -611,6 +621,7 @@ function handleStatus(s, msg) {
   } else if (s === 'error') {
     setInputEnabled(true);
     if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
+    if (currentUserTranscriptEl) { currentUserTranscriptEl = null; }
   }
 }
 
@@ -634,28 +645,29 @@ function sendText() {
 // MIC BUTTON — mouse, touch, and keyboard
 // ============================================================
 
+// ============================================================
+// MIC BUTTON — click to TOGGLE (start/stop) for natural conversation
+// Hold-to-talk was removed: it required constant physical effort,
+// dropped recordings if the user released too early, and made
+// multi-sentence questions impossible.
+// ============================================================
+
 const micBtn = document.getElementById('mic-btn');
 
-// Mouse events — desktop
-micBtn.addEventListener('mousedown', e => { e.preventDefault(); startRecording(); });
-micBtn.addEventListener('mouseup',   () => stopRecording());
-micBtn.addEventListener('mouseleave',() => { if (isRecording) stopRecording(); });
-
-// Touch events — mobile
-micBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); }, { passive: false });
-micBtn.addEventListener('touchend',   e => { e.preventDefault(); stopRecording(); }, { passive: false });
-
-// Space key — hold Space = hold mic button
-document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && !e.repeat && document.activeElement !== document.getElementById('text-input')) {
-    e.preventDefault();
+micBtn.addEventListener('click', e => {
+  e.preventDefault();
+  if (isRecording) {
+    stopRecording();
+  } else {
     startRecording();
   }
 });
-document.addEventListener('keyup', e => {
-  if (e.code === 'Space' && document.activeElement !== document.getElementById('text-input')) {
+
+// Space key — tap to toggle (same as button click)
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !e.repeat && document.activeElement !== document.getElementById('text-input')) {
     e.preventDefault();
-    stopRecording();
+    if (isRecording) stopRecording(); else startRecording();
   }
 });
 
