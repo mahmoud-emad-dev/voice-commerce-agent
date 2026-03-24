@@ -62,12 +62,7 @@ class GeminiLiveHandler:
     
     def _build_system_prompt(self) -> str:
         """The 'Rules' the AI must follow."""
-        return (
-            "You are a friendly Voice Shopping Assistant. "
-            "ALWAYS respond in English only, regardless of the language the user speaks. "
-            "Keep answers short and conversational — 1 to 3 sentences maximum. "
-            "If you don't understand the user, ask one short clarifying question."
-        )
+        return "You are a friendly Voice Shopping Assistant. Keep answers short. ALWAYS respond in English only"   
     
 
     async def send_text(self, text: str) -> None:
@@ -101,7 +96,6 @@ class GeminiLiveHandler:
         Uses send_realtime_input() not send_client_content() because audio is
         a continuous stream — Gemini's VAD detects speech pauses automatically.
         """
-        log.debug("gemini_sending_audio_chunk", bytes=len(pcm_bytes))
         if self._session is None:
             raise RuntimeError("Cannot send audio: session not connected.")
         if not pcm_bytes:
@@ -166,9 +160,10 @@ class GeminiLiveHandler:
             raise RuntimeError("Cannot receive: Gemini session is not connected.")
         while True:
             try:
+                response: types.LiveServerMessage
                 async for response  in self._session.receive():
                     # Gemini sends text in chunks (like a typewriter)
-                    response: types.LiveServerMessage
+                    log.debug("Received response from Gemini:", response=str(response)[:120])  # log a preview of the raw response for debugging
                     if response.text is not None:
                         log.debug("gemini_text_chunk", length=len(response.text))
                         yield {"type": "text", "text": response.text}

@@ -120,8 +120,7 @@ class VoiceWebSocketHandler:
                 # Browser closed the connection cleanly
                 raise WebSocketDisconnect(code=message.get("code", 1000))
 
-            log.info("browser_message_received", message_type=message["type"], session_id=self.session_id)
-            # print(message)
+            # log.info("browser_message_received", message_type=message["type"], session_id=self.session_id )
             raw_bytes: bytes | None = message.get("bytes")
             raw_text:  str   | None = message.get("text")
 
@@ -137,7 +136,7 @@ class VoiceWebSocketHandler:
                     continue   
 
 
-                log.debug("mic_chunk_received",bytes=len(raw_bytes),session_id=self.session_id)
+                # log.debug("mic_chunk_received",bytes=len(raw_bytes),session_id=self.session_id)
 
                 await gemini.send_audio_chunk(raw_bytes)
 
@@ -242,6 +241,7 @@ class VoiceWebSocketHandler:
                 await gemini.send_tool_result(call_id, tool_name, result)
 
 
+
             # ── TURN COMPLETE ──────────────────────────────────────────────
             elif event_type == "turn_complete":
                 # One AI response turn finished.
@@ -257,16 +257,15 @@ class VoiceWebSocketHandler:
                     
                 await self._send_status(STATUS_DONE)
 
-
-            # ── SESSION CLOSED (Gemini ended the connection) ───────────────
+            # ── SESSION CLOSED (Gemini ended connection gracefully) ─────────
             elif event_type == "session_closed":
-                # FIX: was unhandled — event silently dropped and browser never
-                # learned the session ended. Now we notify and stop the task.
+                # FIX: was unhandled — the async for just ended silently,
+                # both tasks kept running but Gemini was gone. Now we notify
+                # the browser so it can reconnect.
                 reason = event.get("reason", "unknown")
                 log.info("gemini_session_closed_gracefully",
                          reason=reason, session=self.session_id)
-                await self._send_status(STATUS_ERROR, "AI session closed — reconnecting...")
-                return  # Stop task; outer handle() will let WebSocket close naturally
+                await self._send_status(STATUS_ERROR, "Session ended — reconnecting...")
             
             # ── ERROR ─────────────────────────────────────────────────────
             elif event_type == MSG_ERROR:

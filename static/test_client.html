@@ -154,7 +154,7 @@
 
 <div class="header">
   <h1>Voice Commerce Agent</h1>
-  <p class="subtitle">Phase 5 — Full voice-to-voice · Click mic to start/stop speaking</p>
+  <p class="subtitle">Phase 5 — Full voice-to-voice · Click mic to speak, click again to stop</p>
 </div>
 
 <div class="top-bar">
@@ -178,8 +178,7 @@
 
 <div id="chat">
   <div class="msg sys">
-    Click the mic button (or press Space) to start speaking. Click again to stop and let the assistant respond.
-    You can also type below at any time.
+    Click the mic button (or press Space) to start speaking. Click again when done — the assistant will respond. You can also type below.
   </div>
 </div>
 
@@ -247,7 +246,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this._chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4096;
     this._buffer = new Float32Array(this._chunkSamples);
     this._bufferIdx = 0;
-    this._active = true;  // FIX: was false — processor permanently silenced all mic audio
+    this._active = true; // FIX: was false — silenced all mic audio
   }
 
   process(inputs) {
@@ -302,6 +301,7 @@ let recvChunks = 0;
 // CAPTURE AudioContext — created when mic_config arrives (16kHz)
 let captureCtx = null;
 let workletNode = null;
+let micSource = null; // stored so stopRecording can disconnect it
 let micStream = null;
 let isRecording = false;
 let sentChunks = 0;
@@ -314,9 +314,11 @@ let sessionId = (() => {
 })();
 let turnCount = 0;
 let currentAiEl = null;
-// Accumulates input_transcript fragments into one bubble per user turn
-// instead of creating a new div per word (the old fragmented behaviour)
+// Accumulates input_transcript words into one bubble per user turn
 let currentUserTranscriptEl = null;
+// True while Gemini is generating audio — mic must NOT send during this time
+// to avoid 1008 "Operation not supported" from the Gemini API
+let geminiSpeaking = false;
 
 document.getElementById('dbg-sid').textContent = sessionId.slice(0,12) + '...';
 
@@ -414,7 +416,7 @@ async function initCapture(sampleRate) {
 
   document.getElementById('dbg-cap').textContent = `PCM s16le @ ${sampleRate}Hz`;
   document.getElementById('mic-btn').disabled = false;
-  document.getElementById('mic-hint').textContent = 'Click to start speaking (or press Space)';
+  document.getElementById('mic-hint').textContent = 'Click to speak (or press Space)';
 }
 
 /**
@@ -425,6 +427,13 @@ async function startRecording() {
   if (isRecording) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (!captureCtx) return;
+  // CRITICAL: Do not send audio while Gemini is responding.
+  // The gemini-2.5-flash-native-audio model returns 1008 "Operation not
+  // supported" if send_realtime_input() is called while it is generating.
+  if (geminiSpeaking) {
+    addMsg('sys', '⏳ Wait for the assistant to finish before speaking.');
+    return;
+  }
 
   // getUserMedia() shows the browser's permission dialog on first call.
   // Subsequent calls reuse the previously granted permission.
@@ -454,6 +463,7 @@ async function startRecording() {
 
   // Connect: microphone → worklet processor
   const source = captureCtx.createMediaStreamSource(micStream);
+  micSource = source; // stored so stopRecording can disconnect it
   workletNode = new AudioWorkletNode(captureCtx, 'pcm-capture-processor', {
     processorOptions: { chunkSamples: 4096 }
     // 4096 samples at 16kHz = 256ms per chunk — good balance of
@@ -474,7 +484,7 @@ async function startRecording() {
 
   isRecording = true;
   document.getElementById('mic-btn').classList.add('recording');
-  document.getElementById('mic-btn').title = 'Click to stop recording';
+  document.getElementById('mic-btn').title = 'Recording — click to stop';
   document.getElementById('mic-ind').classList.add('active');
 
   // Resume playback context too (in case it was suspended)
@@ -493,6 +503,12 @@ function stopRecording() {
     workletNode.port.onmessage = null;
     workletNode.disconnect();
     workletNode = null;
+  }
+
+  // Disconnect the source node too (was leaking as orphan on each press)
+  if (micSource) {
+    micSource.disconnect();
+    micSource = null;
   }
 
   // Stop all mic tracks (releases the browser's mic indicator — the red dot)
@@ -563,10 +579,11 @@ function handleMsg(raw) {
       break;
 
     case 'transcript':
-      // Server sends m.role ("user"/"ai"), not m.speaker
+      // Server sends m.role ("user" or "ai"), not m.speaker
       if (m.role === 'user') {
-        // Accumulate fragments into ONE updating bubble per user turn.
-        // Previously a new div was created per word → wall of "You: ' uh'"
+        // Accumulate word-fragments into ONE bubble per user speech turn.
+        // Gemini streams the transcript word-by-word; each fragment must
+        // append to the same element, not create a new row.
         if (!currentUserTranscriptEl) {
           currentUserTranscriptEl = document.createElement('div');
           currentUserTranscriptEl.className = 'msg transcript-user';
@@ -581,7 +598,7 @@ function handleMsg(raw) {
           scrollBottom();
         }
       } else {
-        // AI output transcript — append to current AI bubble
+        // AI output transcript — stream into the current assistant bubble
         appendToAi(m.text);
       }
       break;
@@ -604,11 +621,19 @@ function handleMsg(raw) {
 
 function handleStatus(s, msg) {
   if (s === 'thinking') {
-    setInputEnabled(false);
+    // Gemini is now generating — stop mic immediately to prevent 1008 error.
+    // The model cannot accept send_realtime_input() while responding.
+    geminiSpeaking = true;
+    if (isRecording) stopRecording();
+    // Update mic button to show it's locked while assistant speaks
+    const btn = document.getElementById('mic-btn');
+    btn.title = 'Wait for assistant to finish...';
     if (msg) addMsg('sys', `⟳ ${msg}`);
   } else if (s === 'done' || s === 'ready') {
+    // Gemini finished — mic is allowed again
+    geminiSpeaking = false;
     if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
-    // Close the user transcript bubble (add closing quote) and reset for next turn
+    // Close and seal the user transcript bubble for this turn
     if (currentUserTranscriptEl) {
       const body = currentUserTranscriptEl.querySelector('.msg-body');
       if (!body.textContent.endsWith('"')) body.textContent += '"';
@@ -616,12 +641,15 @@ function handleStatus(s, msg) {
     }
     nextStartAt = 0;
     setInputEnabled(true);
+    document.getElementById('mic-btn').title = 'Click to speak (or press Space)';
     if (s === 'done') document.getElementById('dbg-turns').textContent = ++turnCount;
     if (msg && s === 'ready') addMsg('sys', `✓ ${msg}`);
   } else if (s === 'error') {
+    geminiSpeaking = false;
     setInputEnabled(true);
     if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
     if (currentUserTranscriptEl) { currentUserTranscriptEl = null; }
+    document.getElementById('mic-btn').title = 'Click to speak (or press Space)';
   }
 }
 
@@ -646,24 +674,21 @@ function sendText() {
 // ============================================================
 
 // ============================================================
-// MIC BUTTON — click to TOGGLE (start/stop) for natural conversation
-// Hold-to-talk was removed: it required constant physical effort,
-// dropped recordings if the user released too early, and made
-// multi-sentence questions impossible.
+// MIC BUTTON — click once to START, click again to STOP
+// Hold-to-talk is removed: it caused the 1008 error because audio
+// kept streaming after Gemini started responding. Toggle mode lets
+// the user speak a full sentence then stop, and Gemini responds
+// only after mic is stopped.
 // ============================================================
 
 const micBtn = document.getElementById('mic-btn');
 
 micBtn.addEventListener('click', e => {
   e.preventDefault();
-  if (isRecording) {
-    stopRecording();
-  } else {
-    startRecording();
-  }
+  if (isRecording) stopRecording(); else startRecording();
 });
 
-// Space key — tap to toggle (same as button click)
+// Space bar: tap to toggle (same as button click)
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' && !e.repeat && document.activeElement !== document.getElementById('text-input')) {
     e.preventDefault();
