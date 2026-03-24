@@ -158,83 +158,83 @@ class GeminiLiveHandler:
     async def receive_events(self) -> AsyncGenerator[dict[str, Any], None]:
         if self._session is None:
             raise RuntimeError("Cannot receive: Gemini session is not connected.")
-        while True:
-            try:
-                response: types.LiveServerMessage
-                async for response  in self._session.receive():
-                    # Gemini sends text in chunks (like a typewriter)
-                    log.debug("Received response from Gemini:", response=str(response)[:120])  # log a preview of the raw response for debugging
-                    if response.text is not None:
-                        log.debug("gemini_text_chunk", length=len(response.text))
-                        yield {"type": "text", "text": response.text}
+        try:
+            response: types.LiveServerMessage
+            async for response  in self._session.receive():
+                # Gemini sends text in chunks (like a typewriter)
+                log.debug("Received response from Gemini:", response=str(response)[:120])  # log a preview of the raw response for debugging
+                if response.text is not None:
+                    log.debug("gemini_text_chunk", length=len(response.text))
+                    yield {"type": "text", "text": response.text}
 
-                    if response.data is not None:
-                        log.debug("gemini_audio_chunk", bytes=len(response.data))
-                        yield {"type": "audio", "data": response.data}
-                    
-                    # ── Tool call ← Phase 3 ─────────────────────────────────
-                    # When Gemini decides to call a function, it sends the call
-                    # in model_turn.parts (not in response.text or response.data).
-                    # We detect it here and yield it so the handler can dispatch it.
-                    #
-                    # WHY check model_turn.parts (not just response.text):
-                    #   Function calls are a separate part type in the Gemini API.
-                    #   They arrive as Part objects with a function_call field,
-                    #   not as text. You cannot detect them from response.text.
+                if response.data is not None:
+                    log.debug("gemini_audio_chunk", bytes=len(response.data))
+                    yield {"type": "audio", "data": response.data}
+                
+                # ── Tool call ← Phase 3 ─────────────────────────────────
+                # When Gemini decides to call a function, it sends the call
+                # in model_turn.parts (not in response.text or response.data).
+                # We detect it here and yield it so the handler can dispatch it.
+                #
+                # WHY check model_turn.parts (not just response.text):
+                #   Function calls are a separate part type in the Gemini API.
+                #   They arrive as Part objects with a function_call field,
+                #   not as text. You cannot detect them from response.text.
 
-                    if (
-                        response.server_content
-                        and response.server_content.model_turn
-                        and response.server_content.model_turn.parts
-                    ):
-                        for part in response.server_content.model_turn.parts:
-                            if hasattr(part, "function_call") and part.function_call:
-                                log.info("gemini_tool_call_detected",tool_name=part.function_call.name)
-                                yield {
-                                    "type": "tool_call",
-                                    "name": part.function_call.name,
-                                    "args": dict(part.function_call.args or {}),
-                                    "call_id": getattr(part.function_call, "id", None),
-                                }
+                if (
+                    response.server_content
+                    and response.server_content.model_turn
+                    and response.server_content.model_turn.parts
+                ):
+                    for part in response.server_content.model_turn.parts:
+                        if hasattr(part, "function_call") and part.function_call:
+                            log.info("gemini_tool_call_detected",tool_name=part.function_call.name)
+                            yield {
+                                "type": "tool_call",
+                                "name": part.function_call.name,
+                                "args": dict(part.function_call.args or {}),
+                                "call_id": getattr(part.function_call, "id", None),
+                            }
 
-                    # INPUT TRANSCRIPT (Phase 5+)
-                    # Text version of what the USER said (from their audio)
-                    if (
-                        response.server_content
-                        and hasattr(response.server_content, "input_transcription")
-                        and response.server_content.input_transcription
-                    ):
-                        transcript = response.server_content.input_transcription
-                        if hasattr(transcript, "text") and transcript.text:
-                            log.debug("gemini_input_transcript", text=transcript.text[:80])
-                            yield {"type": "input_transcript", "text": transcript.text}
-    
-                    # OUTPUT TRANSCRIPT (Phase 4+)
-                    # Text version of what GEMINI said (from its audio response)
-                    if (
-                        response.server_content
-                        and hasattr(response.server_content, "output_transcription")
-                        and response.server_content.output_transcription
-                    ):
-                        transcript = response.server_content.output_transcription
-                        if hasattr(transcript, "text") and transcript.text:
-                            log.debug("gemini_output_transcript", text=transcript.text[:80])
-                            yield {"type": "output_transcript", "text": transcript.text}
+                # INPUT TRANSCRIPT (Phase 5+)
+                # Text version of what the USER said (from their audio)
+                if (
+                    response.server_content
+                    and hasattr(response.server_content, "input_transcription")
+                    and response.server_content.input_transcription
+                ):
+                    transcript = response.server_content.input_transcription
+                    if hasattr(transcript, "text") and transcript.text:
+                        log.debug("gemini_input_transcript", text=transcript.text[:80])
+                        yield {"type": "input_transcript", "text": transcript.text}
 
-                    # Check if Gemini is finished with its thought
-                    if response.server_content and response.server_content.turn_complete:
-                        yield {"type": "turn_complete"}
-                        break  # exit inner loop → outer loop restarts immediately
-            except Exception as exc:
-                error_str = str(exc)
-                if "1000" in error_str or error_str.strip() in ("1000 None.", "1001 None."):
-                    log.info("gemini_session_closed_by_server", reason=error_str)
-                    yield {"type": "session_closed", "reason": error_str}
-                    return  # Stop — session is over, browser will auto-reconnect
-                # Real error — log, notify browser, stop
-                log.error("gemini_receive_error", error=error_str)
-                yield {"type": "error", "message": error_str}
-                return
+                # OUTPUT TRANSCRIPT (Phase 4+)
+                # Text version of what GEMINI said (from its audio response)
+                if (
+                    response.server_content
+                    and hasattr(response.server_content, "output_transcription")
+                    and response.server_content.output_transcription
+                ):
+                    transcript = response.server_content.output_transcription
+                    if hasattr(transcript, "text") and transcript.text:
+                        log.debug("gemini_output_transcript", text=transcript.text[:80])
+                        yield {"type": "output_transcript", "text": transcript.text}
+
+                # Check if Gemini is finished with its thought
+                if response.server_content and response.server_content.turn_complete:
+                    log.debug("gemini_turn_complete")
+                    yield {"type": "turn_complete"}
+        except Exception as exc:
+            error_str = str(exc)
+            graceful = {"1000 None.", "1001 None.", "1000 None. "}
+            if error_str.strip() in graceful:
+                log.info("gemini_session_closed_by_server", reason=error_str)
+                yield {"type": "session_closed", "reason": error_str}
+                return  # Stop — session is over, browser will auto-reconnect
+            # Real error — log, notify browser, stop
+            log.error("gemini_receive_error", error=error_str)
+            yield {"type": "error", "message": error_str}
+            return
 
 
     async def __aenter__(self) -> "GeminiLiveHandler":
