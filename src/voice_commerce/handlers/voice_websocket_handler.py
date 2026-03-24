@@ -8,7 +8,8 @@ import structlog
 from fastapi import WebSocket, WebSocketDisconnect
 
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler 
-
+from voice_commerce.core.voice  import audio_processor 
+from voice_commerce.core.tools import tool_dispatcher
 
 log = structlog.get_logger(__name__)
 
@@ -65,26 +66,13 @@ class VoiceWebSocketHandler:
                  client=str(websocket.client))
         
         # 1. Send audio output config so browser creates AudioContext at 24kHz
-        await self._send_json({"type": MSG_AUDIO_CFG, **self.get_browser_audio_config()})
+        await self._send_json({"type": MSG_AUDIO_CFG, **audio_processor.get_browser_audio_config()})
         
         # 2. Send microphone capture config so browser knows what rate to capture
         #    The browser's AudioWorklet must capture at exactly this rate.
-        await self._send_json({
-            "type": MSG_MIC_CONFIG,
-            "sample_rate": 16000,  # 16000
-            # "sample_rate": GEMINI_INPUT_SAMPLE_RATE,  # 16000
-            "bit_depth": 16,
-            "channels": 1,
-            "encoding": "pcm_s16le",
-            # WHY SEND THIS:
-            #   Hardcoding 16000 in JavaScript is fragile — it must match
-            #   GEMINI_INPUT_SAMPLE_RATE exactly. Sending it from Python means
-            #   one source of truth. If Google changes the required input rate,
-            #   we change audio_processor.py and the browser auto-adapts.
-        })
-
-
+        await self._send_json({"type": MSG_MIC_CONFIG,**audio_processor.get_mic_audio_config()})
         await self._send_status(STATUS_THINKING, "Opening AI session...")
+
 
         try:
             async with GeminiLiveHandler() as gemini:
@@ -125,12 +113,15 @@ class VoiceWebSocketHandler:
         gemini: GeminiLiveHandler) -> None:
         """Continuously receive messages from the browser and send to Gemini."""
         while True:
-            message = await websocket.receive()
+            # await websocket.receive()
+            message = await websocket.receive() 
 
             if message["type"] == "websocket.disconnect":
                 # Browser closed the connection cleanly
                 raise WebSocketDisconnect(code=message.get("code", 1000))
 
+            log.info("browser_message_received", message_type=message["type"], session_id=self.session_id)
+            # print(message)
             raw_bytes: bytes | None = message.get("bytes")
             raw_text:  str   | None = message.get("text")
 
@@ -140,16 +131,15 @@ class VoiceWebSocketHandler:
                 if self._input_mode == "text":
                     # First audio chunk — switch to audio mode and log it
                     self._input_mode = "audio"
-                    log.info("input_mode_switched_to_audio",
-                             session_id=self.session_id)
-            
+                    log.info("input_mode_switched_to_audio",session_id=self.session_id)
                 # Skip tiny chunks (browser may send near-silence)
-                if len(raw_bytes) < 32:
+                if len(raw_bytes) < 64:
                     continue   
+
 
                 log.debug("mic_chunk_received",bytes=len(raw_bytes),session_id=self.session_id)
 
-                # await gemini.send_audio_chunk(raw_bytes)
+                await gemini.send_audio_chunk(raw_bytes)
 
             elif raw_text is not None:
                 # ── TEXT FRAME = typed message or control JSON ─────────────
@@ -243,8 +233,13 @@ class VoiceWebSocketHandler:
                 tool_name = event.get("name", "")
                 tool_args  = event.get("args", {})
                 call_id    = event.get("call_id")
-                log.info("tool_call_received",
-                         tool=tool_name, session=self.session_id)
+                log.info("tool_call_received",  tool=tool_name, session=self.session_id)
+                # Execute the tool and get the result string
+                context = tool_dispatcher.ToolContext(session_id=self.session_id)
+                result = await tool_dispatcher.execute(tool_name, tool_args, context)
+                log.info("tool_call_result", tool=tool_name,preview=result[:80], session=self.session_id)
+                # Send the result back to Gemini, referencing the call_id so Gemini knows which call this result belongs to
+                await gemini.send_tool_result(call_id, tool_name, result)
 
 
             # ── TURN COMPLETE ──────────────────────────────────────────────
@@ -279,12 +274,12 @@ class VoiceWebSocketHandler:
     # HELPER METHODS
     # =========================================================================
 
-    def get_browser_audio_config(self) -> dict[str, Any]:
-        """Returns the standard Gemini audio output configuration."""
-        return {
-            "sample_rate": 24000,
-            "response_modality": "audio"
-        }
+    # def get_browser_audio_config(self) -> dict[str, Any]:
+    #     """Returns the standard Gemini audio output configuration."""
+    #     return {
+    #         "sample_rate": 24000,
+    #         "response_modality": "audio"
+    #     }
 
     def _parse_text_message(self,raw_text: str) -> str:
         """

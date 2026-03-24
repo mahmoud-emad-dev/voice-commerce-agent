@@ -61,7 +61,7 @@ class TestVoiceWebSocketConnection:
             with sync_client.websocket_connect("/ws/voice") as ws:
                 # Connection opened successfully
                 # Receive the initial status message the server sends on connect
-                raw = ws.receive_text(timeout=5)
+                raw = ws.receive_text()
                 data = json.loads(raw)
                 # Server sends either a status or connected message first
                 assert "type" in data
@@ -75,7 +75,7 @@ class TestVoiceWebSocketConnection:
         """
         with sync_client.websocket_connect("/ws/voice") as ws:
             # First message should be a status update
-            raw = ws.receive_text(timeout=5)
+            raw = ws.receive_text()
             data = json.loads(raw)
             assert data.get("type") == "status", (
                 f"Expected first message type='status', got: {data}"
@@ -92,7 +92,7 @@ class TestVoiceWebSocketConnection:
                 f"/ws/voice?session_id={custom_session}"
             ) as ws:
                 # Just verify connection works with the param
-                raw = ws.receive_text(timeout=5)
+                raw = ws.receive_text()
                 data = json.loads(raw)
                 assert "type" in data
         except Exception as e:
@@ -107,7 +107,7 @@ class TestVoiceWebSocketConnection:
         """
         # Simply verify no exception is raised when connecting without session_id
         with sync_client.websocket_connect("/ws/voice") as ws:
-            raw = ws.receive_text(timeout=5)
+            raw = ws.receive_text()
             assert raw  # Something was received
 
 
@@ -120,7 +120,7 @@ class TestVoiceWebSocketProtocol:
         Browser UI depends on this structure.
         """
         with sync_client.websocket_connect("/ws/voice") as ws:
-            raw = ws.receive_text(timeout=5)
+            raw = ws.receive_text()
             data = json.loads(raw)
 
             if data.get("type") == "status":
@@ -132,7 +132,7 @@ class TestVoiceWebSocketProtocol:
         The browser's JSON.parse() will throw on invalid JSON.
         """
         with sync_client.websocket_connect("/ws/voice") as ws:
-            raw = ws.receive_text(timeout=5)
+            raw = ws.receive_text()
             try:
                 json.loads(raw)
             except json.JSONDecodeError as e:
@@ -162,7 +162,7 @@ class TestVoiceWebSocketGemini:
             # Wait for ready status
             messages = []
             for _ in range(5):  # Receive up to 5 messages waiting for "done"/"ready"
-                raw = ws.receive_text(timeout=10)
+                raw = ws.receive_text()
                 data = json.loads(raw)
                 messages.append(data)
                 if data.get("type") == "status" and data.get("status") in ("done", "ready"):
@@ -175,7 +175,7 @@ class TestVoiceWebSocketGemini:
             response_texts = []
             got_done = False
             for _ in range(20):  # Max 20 messages to avoid infinite loop
-                raw = ws.receive_text(timeout=15)
+                raw = ws.receive_text()
                 data = json.loads(raw)
                 if data.get("type") == "text":
                     response_texts.append(data.get("text", ""))
