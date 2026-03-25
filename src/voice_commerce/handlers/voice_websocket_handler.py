@@ -283,13 +283,6 @@ class VoiceWebSocketHandler:
     # HELPER METHODS
     # =========================================================================
 
-    # def get_browser_audio_config(self) -> dict[str, Any]:
-    #     """Returns the standard Gemini audio output configuration."""
-    #     return {
-    #         "sample_rate": 24000,
-    #         "response_modality": "audio"
-    #     }
-
     def _parse_text_message(self,raw_text: str) -> str:
         """
         Extract user text from a raw WebSocket text frame.

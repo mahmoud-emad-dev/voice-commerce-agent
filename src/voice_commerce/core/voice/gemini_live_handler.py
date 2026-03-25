@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from  collections.abc import AsyncGenerator
 from typing import Any
 
@@ -7,8 +8,8 @@ import structlog
 from google import genai
 from google.genai import types
 
-from voice_commerce.core.tools import tool_registry   # ← Phase 3: import the tool declarations
-from voice_commerce.core.voice import audio_processor  # ← Phase 5: import audio config for browser
+from voice_commerce.core.tools import tool_registry   
+from voice_commerce.core.voice import audio_processor  
 from voice_commerce.config.settings import settings
 
 
@@ -55,6 +56,7 @@ class GeminiLiveHandler:
             input_audio_transcription=types.AudioTranscriptionConfig(),   
             output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=tool_registry.get_all_tools(),   # ← Phase 3: the one new line
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
 
             )
             
@@ -159,82 +161,114 @@ class GeminiLiveHandler:
         if self._session is None:
             raise RuntimeError("Cannot receive: Gemini session is not connected.")
         try:
-            response: types.LiveServerMessage
-            async for response  in self._session.receive():
-                # Gemini sends text in chunks (like a typewriter)
-                log.debug("Received response from Gemini:", response=str(response)[:120])  # log a preview of the raw response for debugging
-                if response.text is not None:
-                    log.debug("gemini_text_chunk", length=len(response.text))
-                    yield {"type": "text", "text": response.text}
+            while True:
+                saw_message_in_this_receive_call = False
+                response: types.LiveServerMessage
+                async for response in self._session.receive():
+                    saw_message_in_this_receive_call = True
+                    log.debug("Received response from Gemini:", response=str(response)[:])  # log a preview of the raw response for debugging
 
-                if response.data is not None:
-                    log.debug("gemini_audio_chunk", bytes=len(response.data))
-                    yield {"type": "audio", "data": response.data}
-                
-                # ── Tool call ← Phase 3 ─────────────────────────────────
-                # When Gemini decides to call a function, it sends the call
-                # in model_turn.parts (not in response.text or response.data).
-                # We detect it here and yield it so the handler can dispatch it.
-                #
-                # WHY check model_turn.parts (not just response.text):
-                #   Function calls are a separate part type in the Gemini API.
-                #   They arrive as Part objects with a function_call field,
-                #   not as text. You cannot detect them from response.text.
-
-                if (
-                    response.server_content
-                    and response.server_content.model_turn
-                    and response.server_content.model_turn.parts
-                ):
-                    for part in response.server_content.model_turn.parts:
-                        if hasattr(part, "function_call") and part.function_call:
-                            log.info("gemini_tool_call_detected",tool_name=part.function_call.name)
+                    # 1) Tool calls are top-level on Live API responses.        # ── Tool call ← Phase 3 ──────
+                    if response.tool_call and response.tool_call.function_calls:
+                        for function_call in response.tool_call.function_calls:
                             yield {
                                 "type": "tool_call",
-                                "name": part.function_call.name,
-                                "args": dict(part.function_call.args or {}),
-                                "call_id": getattr(part.function_call, "id", None),
+                                "name": function_call.name,
+                                "args": dict(function_call.args or {}),
+                                "call_id": function_call.id,
                             }
+                        log.debug("gemini_tool_call_detected", tool_names=[fc.name for fc in response.tool_call.function_calls])
 
-                # INPUT TRANSCRIPT (Phase 5+)
-                # Text version of what the USER said (from their audio)
-                if (
-                    response.server_content
-                    and hasattr(response.server_content, "input_transcription")
-                    and response.server_content.input_transcription
-                ):
-                    transcript = response.server_content.input_transcription
-                    if hasattr(transcript, "text") and transcript.text:
-                        log.debug("gemini_input_transcript", text=transcript.text[:80])
-                        yield {"type": "input_transcript", "text": transcript.text}
+                    server_content = response.server_content
+                    if not server_content:
+                        continue
 
-                # OUTPUT TRANSCRIPT (Phase 4+)
-                # Text version of what GEMINI said (from its audio response)
-                if (
-                    response.server_content
-                    and hasattr(response.server_content, "output_transcription")
-                    and response.server_content.output_transcription
-                ):
-                    transcript = response.server_content.output_transcription
-                    if hasattr(transcript, "text") and transcript.text:
-                        log.debug("gemini_output_transcript", text=transcript.text[:80])
-                        yield {"type": "output_transcript", "text": transcript.text}
+                    # 2) Model output: audio/text parts.
+                    model_turn = server_content.model_turn
+                    if model_turn and model_turn.parts:
+                        for part in model_turn.parts:
+                            if getattr(part, "text", None):
+                                log.debug("Received gemini_text_chunk", length=len(part.text or ""))
+                                if hasattr(part, "thought") and not part.thought:
+                                # log.debug("gemini_thought_chunk", text=part.text[:80])
+                                    yield {"type": "text", "text": part.text}
 
-                # Check if Gemini is finished with its thought
-                if response.server_content and response.server_content.turn_complete:
-                    log.debug("gemini_turn_complete")
-                    yield {"type": "turn_complete"}
+                            inline_data = getattr(part, "inline_data", None)
+                            if inline_data and inline_data.data:
+                                    audio_data = inline_data.data
+                                    log.debug("gemini_audio_chunk", bytes=len(audio_data))
+                                    yield {"type": "audio", "data": audio_data}
+
+
+                    # 3) Speech transcriptions.
+                    if hasattr(response.server_content, "input_transcription") and server_content.input_transcription and server_content.input_transcription.text:
+                        log.debug("gemini_input_transcript", text=server_content.input_transcription.text[:80])
+                        yield {"type": "input_transcript", "text": server_content.input_transcription.text}
+
+                    if hasattr(response.server_content, "output_transcription") and server_content.output_transcription and server_content.output_transcription.text:
+                        log.debug("gemini_output_transcript", text=server_content.output_transcription.text[:100])
+                        yield {"type": "output_transcript", "text": server_content.output_transcription.text}
+
+
+
+
+                    # 4) Turn complete signal.
+                    if server_content.turn_complete:
+                        reason = None
+                        log.debug("gemini_turn_complete")
+                        if server_content.turn_complete_reason is not None:
+                            reason = getattr(
+                                server_content.turn_complete_reason,
+                                "value",
+                                str(server_content.turn_complete_reason),
+                            )
+                        yield {"type": "turn_complete", "reason": reason} 
+                    
+                if not saw_message_in_this_receive_call:
+                    log.debug("gemini_receive_no_message", message="No messages received in this call to session.receive(). This may indicate a silent disconnection or a network issue.")
+                    yield {
+                        "type": "session_closed",
+                        "reason": "receive() finished",
+                    }
+                    return
+                
+                # Tiny cooperative pause before the next turn-scoped receive().
+                # await asyncio.sleep(0)
+
+
         except Exception as exc:
-            error_str = str(exc)
-            graceful = {"1000 None.", "1001 None.", "1000 None. "}
-            if error_str.strip() in graceful:
-                log.info("gemini_session_closed_by_server", reason=error_str)
-                yield {"type": "session_closed", "reason": error_str}
-                return  # Stop — session is over, browser will auto-reconnect
-            # Real error — log, notify browser, stop
-            log.error("gemini_receive_error", error=error_str)
-            yield {"type": "error", "message": error_str}
+            error_msg = str(exc)
+            if "1008" in error_msg and  "Operation is not implemented" in error_msg:
+                log.error("gemini_1008_live_api_bug", error=error_msg)
+                yield {
+                "type": "session_closed",
+                "reason": "gemini_live_1008",
+                "retryable": True,
+                }
+                return
+            
+            # Common "normal close" cases from the upstream websocket.
+            if "1000" in error_msg or "1001" in error_msg:
+                log.info("gemini_session_closed_by_server", reason=error_msg)
+                yield {"type": "session_closed", "reason": error_msg}
+                return
+
+            log.error("gemini_receive_error", error=error_msg)
+            yield {"type": "error", "message": error_msg}
             return
+
+
+        # except Exception as exc:
+        #     error_str = str(exc)
+        #     graceful = {"1000 None.", "1001 None.", "1000 None. "}
+        #     if error_str.strip() in graceful:
+        #         log.info("gemini_session_closed_by_server", reason=error_str)
+        #         yield {"type": "session_closed", "reason": error_str}
+        #         return  # Stop — session is over, browser will auto-reconnect
+        #     # Real error — log, notify browser, stop
+        #     log.error("gemini_receive_error", error=error_str)
+        #     yield {"type": "error", "message": error_str}
+        #     return
 
 
     async def __aenter__(self) -> "GeminiLiveHandler":

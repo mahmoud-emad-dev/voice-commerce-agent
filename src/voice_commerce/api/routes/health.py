@@ -36,8 +36,7 @@ class ReadyResponse(BaseModel):
 
 
 
-@router.get(
-    "/health",
+@router.get("/health",
     response_model=HealthResponse,
     summary="Liveness check",
     description="Returns 200 if the server process is alive. Used by Docker, load balancers, and monitoring.",
