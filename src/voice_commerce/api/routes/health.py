@@ -1,3 +1,13 @@
+# src/voice_commerce/api/routes/health.py
+# ==============================================================================
+# PURPOSE: Provides Liveness and Readiness probes for the FastAPI server.
+#
+# WHY THIS FILE EXISTS:
+#   In production (Docker/Kubernetes), the infrastructure needs to know if the 
+#   server is alive (Liveness) and if it is fully connected to its dependencies 
+#   like Gemini or WooCommerce (Readiness) before routing user traffic to it.
+# ==============================================================================
+
 from __future__ import annotations
 import time
 
@@ -72,12 +82,7 @@ async def readiness_check() -> ReadyResponse:
     Phase 2+: Will also ping Gemini API.
     Phase 6+: Will also check WooCommerce connectivity.
     Phase 7+: Will also check Qdrant connectivity.
- 
-    WHY SEPARATE FROM /health:
-        Liveness (/health) = "Is the process alive?" → restart if no
-        Readiness (/ready)  = "Is the app ready?"    → stop sending traffic if no
-        A container can be alive but not ready (still loading ML model).
-        Kubernetes and most load balancers use both checks separately.
+    
     """
 
     checks: dict[str, str] = {}
@@ -87,14 +92,31 @@ async def readiness_check() -> ReadyResponse:
     else:
         checks["gemini_configured"] = "missing_api_key"
 
-    is_ready = settings.gemini_api_key != ""
- 
-    log.debug("readiness_check_called", checks=checks, is_ready=is_ready)
 
+
+    # # Check 2: Is WooCommerce configured?
+    # if settings.is_woocommerce_configured:
+    #     checks["woocommerce_configured"] = "ok"
+    # else:
+    #     checks["woocommerce_configured"] = "not_configured_yet"
+    #     # Note: NOT an error in Phase 1-5. WooCommerce is added in Phase 6.
+ 
+    # # Check 3: What Qdrant mode are we using?
+    # checks["qdrant_mode"] = settings.qdrant_mode
+
+
+    # We could add actual HTTP pings to Gemini/Qdrant here in later phases.
+    is_ready = settings.gemini_api_key != ""
+    status = "ready" if is_ready else "not_ready"
+    log.debug("readiness_check_called", checks=checks, is_ready=is_ready)
+    if not is_ready:
+        log.warning("readiness_check_failed", checks=checks)
+    else:
+        log.debug("readiness_check_passed")
 
 
     return ReadyResponse(
-            status="ready" if is_ready else "not_ready",
+            status=status,
             checks=checks,
         )
 

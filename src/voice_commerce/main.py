@@ -1,10 +1,15 @@
 # src/voice_commerce/main.py
-# ===========================
-# PURPOSE: The entry point and "App Factory" for the server.
-# WHY THIS FILE EXISTS: It connects the settings, routes, and middleware 
-# together into a single running FastAPI application.
+# ==============================================================================
+# PURPOSE: The entry point and "App Factory" for the FastAPI server.
+#
+# WHY THIS FILE EXISTS: 
+#   It connects settings, routers, and middleware into a single ASGI application.
+#   We use a factory function (create_app) so we can easily create test instances
+#   of the app during automated testing without starting the real server.
+# ==============================================================================
 # THIS FILE IN THE ARCHITECTURE: The central nervous system.
-# ===========================
+# # ==============================================================================
+
 
 
 from __future__ import annotations
@@ -82,6 +87,8 @@ def create_app() -> FastAPI:
     """
     Factory function to create and configure the FastAPI instance.
     """
+    configure_logging()
+
     app = FastAPI(
         title="Voice Commerce Agent",
         description="An AI agent for voice commerce applications.",
@@ -91,11 +98,11 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.app_debug else None,
     )
 
-    # CORS Middleware
+    # CORS Middleware: Allows the frontend browser to talk to this backend
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Adjust this in production
-        allow_credentials=True,
+        allow_origins=["*"],  # Adjust this in production # Phase 14: Restrict this to real domain name
+        allow_credentials=True, 
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -106,18 +113,12 @@ def create_app() -> FastAPI:
         """
         Root endpoint returning basic API metadata.
         """
-        return {
-            "message": "Welcome to the Voice Commerce Agent API",
-            "docs": "/docs",
-            "version": "0.1.0"
-        }
-    # Register other routes
+        return {"message": "Welcome to the Voice Commerce Agent API", "version": "0.1.0"}
+    # Register other routes 
     app.include_router(health.router ,tags=["system"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
 
-
-
-
+    # Mount the frontend UI folder so localhost:8000/static/test_client.html works
     static_dir = "static"
     if os.path.exists(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -125,5 +126,5 @@ def create_app() -> FastAPI:
 
     return app
 
-
+# The actual global variable Uvicorn looks for to start the server
 app = create_app()

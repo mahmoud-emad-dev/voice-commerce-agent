@@ -1,3 +1,9 @@
+# src/voice_commerce/core/voice/gemini_live_handler.py
+# ==============================================================================
+# PURPOSE: The isolated adapter for the Google Gemini Live API.
+#
+# ==============================================================================
+
 from __future__ import annotations
 import asyncio
 from  collections.abc import AsyncGenerator
@@ -17,6 +23,7 @@ log = structlog.get_logger(__name__)
 
 
 class GeminiLiveHandler:
+    """Handles the bidirectional audio/text stream with Gemini."""
 
     def __init__(self) -> None:
         self._client = genai.Client(api_key=settings.gemini_api_key) 
@@ -30,10 +37,13 @@ class GeminiLiveHandler:
             voice=settings.gemini_voice_name,
         )
 
+    # =========================================================================
+    # Gemini Configuration ( Session - Prompt - Voice - Others)
+    # =========================================================================
+
     def _build_session_config(self) -> types.LiveConnectConfig:
         """Builds the configuration for the Gemini speech session."""
         
-
         return types.LiveConnectConfig(
 
             response_modalities=[types.Modality.AUDIO],
@@ -41,39 +51,42 @@ class GeminiLiveHandler:
                 parts=[
                     types.Part(
                         text=self._build_system_prompt()
-                    )
-                ]
-            ),
+                        )
+                    ]
+                ),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
                         voice_name=settings.gemini_voice_name
                         # Available: "Aoede", "Charon", "Fenrir", "Kore", "Puck"
                         # Charon: clear, neutral — good for shopping assistant
-                    )
-                )
-            ),
+                        )
+                    ),
+                language_code="en-US",
+                ),
             input_audio_transcription=types.AudioTranscriptionConfig(),   
             output_audio_transcription=types.AudioTranscriptionConfig(),
-            tools=tool_registry.get_all_tools(),   # ← Phase 3: the one new line
+            tools=tool_registry.get_all_tools(),  
             thinking_config=types.ThinkingConfig(thinking_budget=0),
 
             )
             
-
     
     def _build_system_prompt(self) -> str:
         """The 'Rules' the AI must follow."""
         return "You are a friendly Voice Shopping Assistant. Keep answers short. ALWAYS respond in English only"   
     
 
+    # =========================================================================
+    # SENDING METHODS (App -> Gemini)
+    # =========================================================================
     async def send_text(self, text: str) -> None:
         """Sends text to Gemini and yields response text as it arrives."""
         if self._session is None:
             raise RuntimeError(
                 "Cannot send text: Gemini session is not connected. "
                 "Did you use 'async with handler.connect():'?"
-            )
+            )   
         
         log.debug("gemini_sending_text", text=text)
 
@@ -82,19 +95,14 @@ class GeminiLiveHandler:
                 role="user",
                 parts=[types.Part(text=text)]
             ),
-            turn_complete=True,
-            # turn_complete=True is the key flag that tells Gemini:
-            # "The user is done speaking, please respond now."
+            turn_complete=True, # turn_complete=True is the key flag that tells Gemini: "The user is done speaking, please respond now."
+            
         )
-
 
 
     async def send_audio_chunk(self, pcm_bytes: bytes) -> None:
         """
-        Stream mic audio from the browser to Gemini.
-        Added in Phase 5 (microphone input). Kept here ready for that phase.
- 
-        Format required: PCM s16le at 16kHz mono.
+        Stream mic audio from the browser to Gemini. 
         Uses send_realtime_input() not send_client_content() because audio is
         a continuous stream — Gemini's VAD detects speech pauses automatically.
         """
@@ -112,6 +120,20 @@ class GeminiLiveHandler:
 
 
     async def send_tool_result(self, call_id:   str | None, tool_name: str,result:    str) -> None:
+        """
+        Send a python function's return value back to Gemini after executing it.
+ 
+        FULL FLOW:
+        1. User:  "show me running shoes"
+        2. Gemini yields tool_call → name="search_products"
+        3. Handler dispatches → search_products() runs → returns result string
+        4. Handler calls this method → result delivered to Gemini
+        5. Gemini reads result → speaks it naturally to the user
+ 
+        WHY result is a string (not JSON or a dict):
+        Gemini reads the result as text context, then paraphrases it into
+        natural speech. A structured readable string is ideal.
+        """
 
         if self._session is None:
             raise RuntimeError("Cannot send tool result: not connected.")
@@ -127,59 +149,37 @@ class GeminiLiveHandler:
             ],
         )
 
-            # """
-            # Send a tool's return value back to Gemini after executing it.  ← new Phase 3
- 
-            # FULL FLOW:
-            # 1. User:  "show me running shoes"
-            # 2. Gemini yields tool_call → name="search_products", args={"query":"running shoes"}
-            # 3. Handler dispatches → search_products() runs → returns result string
-            # 4. Handler calls this method → result delivered to Gemini
-            # 5. Gemini reads result → speaks it naturally to the user
-    
-            # WHY send_tool_response() NOT send_client_content():
-            # send_client_content() is for USER messages (text or audio the user sent).
-            # send_tool_response() is for FUNCTION RESULTS.
-            # The Gemini API routes them to completely different internal processors.
-            # Using send_client_content() here would make Gemini treat your search
-            # results as if the USER said them — broken conversation structure.
-    
-            # WHY result is a string (not JSON or a dict):
-            # Gemini reads the result as text context, then paraphrases it into
-            # natural speech. A structured readable string like:
-            #     "• Nike Air Zoom — $129 — ID:1\n  Lightweight running shoe."
-            # is ideal. Gemini turns this into:
-            #     "I found the Nike Air Zoom for a hundred and twenty-nine dollars.
-            #     It's a lightweight running shoe. Want to add it to your cart?"
-    
-            # ABOUT call_id:
-            # Gemini assigns a unique ID to each tool call for correlation.
-            # It can be None for some model versions — send_tool_response handles None.
-            # """
-
+    # =========================================================================
+    # RECEIVING Events METHOD (Gemini -> App)
+    # =========================================================================
     async def receive_events(self) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Listens to the stream from Gemini and yields events to the app.
+        """
         if self._session is None:
             raise RuntimeError("Cannot receive: Gemini session is not connected.")
         try:
+            # We need this outer loop because session.receive() naturally ends 
+            # its iterator after a turn completes. This re-enters the stream.
             while True:
                 saw_message_in_this_receive_call = False
                 response: types.LiveServerMessage
                 async for response in self._session.receive():
                     saw_message_in_this_receive_call = True
-                    log.debug("Received response from Gemini:", response=str(response)[:])  # log a preview of the raw response for debugging
+                    log.debug("Received response from Gemini:", response=str(response)[:])  # log a preview of the raw response for debugging Temp
 
-                    # 1) Tool calls are top-level on Live API responses.        # ── Tool call ← Phase 3 ──────
+                    # ── 1. TOOL CALLS are top-level on Live API responses. ──────────────────────────────────────────       
                     if response.tool_call and response.tool_call.function_calls:
                         for function_call in response.tool_call.function_calls:
                             yield {
                                 "type": "tool_call",
                                 "name": function_call.name,
                                 "args": dict(function_call.args or {}),
-                                "call_id": function_call.id,
+                                "call_id": getattr(function_call, "id", None),
                             }
                         log.debug("gemini_tool_call_detected", tool_names=[fc.name for fc in response.tool_call.function_calls])
 
-                    server_content = response.server_content
+                    server_content = getattr(response, "server_content", None)
                     if not server_content:
                         continue
 
@@ -187,57 +187,50 @@ class GeminiLiveHandler:
                     model_turn = server_content.model_turn
                     if model_turn and model_turn.parts:
                         for part in model_turn.parts:
+                            ## Handle text
                             if getattr(part, "text", None):
                                 log.debug("Received gemini_text_chunk", length=len(part.text or ""))
                                 if hasattr(part, "thought") and not part.thought:
-                                # log.debug("gemini_thought_chunk", text=part.text[:80])
                                     yield {"type": "text", "text": part.text}
 
+                            ## Handle audio
                             inline_data = getattr(part, "inline_data", None)
                             if inline_data and inline_data.data:
-                                    audio_data = inline_data.data
-                                    log.debug("gemini_audio_chunk", bytes=len(audio_data))
-                                    yield {"type": "audio", "data": audio_data}
-
+                                audio_data = inline_data.data
+                                log.debug("Received gemini_audio_chunk", bytes=len(audio_data))
+                                yield {"type": "audio", "data": audio_data}
 
                     # 3) Speech transcriptions.
-                    if hasattr(response.server_content, "input_transcription") and server_content.input_transcription and server_content.input_transcription.text:
-                        log.debug("gemini_input_transcript", text=server_content.input_transcription.text[:80])
-                        yield {"type": "input_transcript", "text": server_content.input_transcription.text}
+                    ## Transcriptions of User Input
+                    input_trans = getattr(server_content, "input_transcription", None)
+                    if input_trans and getattr(input_trans, "text", None):
+                        log.debug("gemini_input_transcript", text=server_content.input_trans.text[:80])
+                        yield {"type": "input_transcript", "text": server_content.input_trans.text}
 
-                    if hasattr(response.server_content, "output_transcription") and server_content.output_transcription and server_content.output_transcription.text:
-                        log.debug("gemini_output_transcript", text=server_content.output_transcription.text[:100])
-                        yield {"type": "output_transcript", "text": server_content.output_transcription.text}
-
-
+                    ## Transcriptions of Model Output
+                    output_trans = getattr(server_content, "output_transcription", None)
+                    if output_trans and getattr(output_trans, "text", None):
+                        log.debug("gemini_output_transcript", text=server_content.output_trans.text[:100])
+                        yield {"type": "output_transcript", "text": server_content.output_trans.text}
 
 
                     # 4) Turn complete signal.
                     if server_content.turn_complete:
-                        reason = None
                         log.debug("gemini_turn_complete")
-                        if server_content.turn_complete_reason is not None:
-                            reason = getattr(
-                                server_content.turn_complete_reason,
-                                "value",
-                                str(server_content.turn_complete_reason),
-                            )
-                        yield {"type": "turn_complete", "reason": reason} 
-                    
+                        yield {"type": "turn_complete"} 
+                
+                # ── 5. DEAD CONNECTION DETECTOR ────────────────────────────────
                 if not saw_message_in_this_receive_call:
                     log.debug("gemini_receive_no_message", message="No messages received in this call to session.receive(). This may indicate a silent disconnection or a network issue.")
-                    yield {
-                        "type": "session_closed",
-                        "reason": "receive() finished",
-                    }
-                    return
-                
+                    yield {"type": "session_closed","reason": "receive() finished AS silent_disconnect"}
+                    return # Kills the while True loop safely!
                 # Tiny cooperative pause before the next turn-scoped receive().
-                # await asyncio.sleep(0)
+                await asyncio.sleep(0.01)
 
 
         except Exception as exc:
             error_msg = str(exc)
+            # 1. Catch known Gemini Live API bugs (e.g., fast barge-in panic)
             if "1008" in error_msg and  "Operation is not implemented" in error_msg:
                 log.error("gemini_1008_live_api_bug", error=error_msg)
                 yield {
@@ -246,7 +239,7 @@ class GeminiLiveHandler:
                 "retryable": True,
                 }
                 return
-            
+            # 2. Catch normal WebSocket closures (Not actual errors!)
             # Common "normal close" cases from the upstream websocket.
             if "1000" in error_msg or "1001" in error_msg:
                 log.info("gemini_session_closed_by_server", reason=error_msg)
@@ -258,25 +251,16 @@ class GeminiLiveHandler:
             return
 
 
-        # except Exception as exc:
-        #     error_str = str(exc)
-        #     graceful = {"1000 None.", "1001 None.", "1000 None. "}
-        #     if error_str.strip() in graceful:
-        #         log.info("gemini_session_closed_by_server", reason=error_str)
-        #         yield {"type": "session_closed", "reason": error_str}
-        #         return  # Stop — session is over, browser will auto-reconnect
-        #     # Real error — log, notify browser, stop
-        #     log.error("gemini_receive_error", error=error_str)
-        #     yield {"type": "error", "message": error_str}
-        #     return
-
-
+    # =========================================================================
+    # LIFECYCLE MANAGEMENT
+    # =========================================================================
     async def __aenter__(self) -> "GeminiLiveHandler":
-        log.info("gemini_session_connecting", model=settings.gemini_model   )
+        """Opens the WebSocket to Gemini's servers."""
+        log.info("gemini_session_connecting", model=settings.gemini_model )
 
         self._session_ctx = self._client.aio.live.connect(
             model=settings.gemini_model,
-            config=self._config,
+            config=self._config,    
         )
 
         # Enter the context manager → opens the WebSocket to Gemini's servers
@@ -287,11 +271,8 @@ class GeminiLiveHandler:
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """ 
-        Close the Gemini Live session.
+        Close the Gemini Live session safely.
         Called automatically when exiting the `async with` block.
- 
-        exc_type, exc_val, exc_tb: exception info if an exception occurred
-        (None, None, None if the block exited normally)
         """
         log.info("gemini_session_closing")
  
