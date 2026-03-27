@@ -68,14 +68,32 @@ class GeminiLiveHandler:
             output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=tool_registry.get_all_tools(),  
             thinking_config=types.ThinkingConfig(thinking_budget=0),
+            # realtime_input_config=types.RealtimeInputConfig(
+            #         automatic_activity_detection=types.AutomaticActivityDetection(
+            #             disabled=False,
+            #             start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_LOW,
+            #             end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+            #             prefix_padding_ms=100,
+            #             silence_duration_ms=600,
+            #         )
+                # ),
 
             )
             
     
     def _build_system_prompt(self) -> str:
         """The 'Rules' the AI must follow."""
-        return "You are a friendly Voice Shopping Assistant. Keep answers short. ALWAYS respond in English only"   
-    
+        return """
+                You are a friendly voice shopping assistant.
+
+                Rules:
+                - Keep answers short.
+                - Wait until the user's intent is clear before calling any tool.
+                - If the user utterance is partial, vague, noisy, or unfinished, ask one short clarification question.
+                - Do not call tools for filler or ambiguous phrases like: "what about", "okay", ".", "yes", "no" unless the previous turn already made the target product explicit.
+                - Before add_to_cart, make sure the product is explicit and the user clearly confirmed it.
+                - If the user asks about the current product with vague follow-ups like "what about price?" or "describe it", keep referring to the last clearly discussed product.
+                """ 
 
     # =========================================================================
     # SENDING METHODS (App -> Gemini)
@@ -149,6 +167,17 @@ class GeminiLiveHandler:
             ],
         )
 
+
+    # async def send_audio_stream_end(self) -> None:
+    #     """
+    #     Tell Gemini that the current user audio stream has ended.
+    #     This helps Gemini flush buffered speech and respond sooner.
+    #     """
+    #     if self._session is None:
+    #         raise RuntimeError("Cannot end audio stream: session not connected.")
+
+    #     await self._session.send_realtime_input(audio_stream_end=True)
+
     # =========================================================================
     # RECEIVING Events METHOD (Gemini -> App)
     # =========================================================================
@@ -182,6 +211,10 @@ class GeminiLiveHandler:
                     server_content = getattr(response, "server_content", None)
                     if not server_content:
                         continue
+                    
+                    # if getattr(server_content, "interrupted", False):
+                    #     log.info("gemini_interrupted")
+                    #     yield {"type": "interrupted"}
 
                     # 2) Model output: audio/text parts.
                     model_turn = server_content.model_turn
@@ -204,14 +237,14 @@ class GeminiLiveHandler:
                     ## Transcriptions of User Input
                     input_trans = getattr(server_content, "input_transcription", None)
                     if input_trans and getattr(input_trans, "text", None):
-                        log.debug("gemini_input_transcript", text=server_content.input_trans.text[:80])
-                        yield {"type": "input_transcript", "text": server_content.input_trans.text}
+                        log.debug("gemini_input_transcript", text=input_trans.text[:80])
+                        yield {"type": "input_transcript", "text": input_trans.text}
 
                     ## Transcriptions of Model Output
                     output_trans = getattr(server_content, "output_transcription", None)
                     if output_trans and getattr(output_trans, "text", None):
-                        log.debug("gemini_output_transcript", text=server_content.output_trans.text[:100])
-                        yield {"type": "output_transcript", "text": server_content.output_trans.text}
+                        log.debug("gemini_output_transcript", text=output_trans.text[:100])
+                        yield {"type": "output_transcript", "text": output_trans.text}
 
 
                     # 4) Turn complete signal.

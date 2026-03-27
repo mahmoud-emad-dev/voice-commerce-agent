@@ -59,7 +59,7 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
 
 
     if product_id in cart:
-        cart[product_id]["quantity"] += quantity
+        cart[product_id]["quantity"] = quantity
         action = "Updated"
     else:
         cart[product_id] = {

@@ -93,7 +93,12 @@ def _matches(product: dict, query: str) -> bool:
         + " " + product["description"].lower()
     )
     # Match if ANY word in the query appears in the searchable text
-    return any(word in text for word in query.lower().split())
+    words = [word for word in query.lower().split() if len(word) > 2]
+    if not words:
+        return False
+
+    score = sum(1 for word in words if word in text)
+    return score >= max(1, len(words) - 1)
 
 
 async def search_products(query: str, max_price: float | None = None, category: str | None = None , session_id: str = "default",) -> str:
@@ -112,6 +117,10 @@ async def search_products(query: str, max_price: float | None = None, category: 
     log.info("search_products", query=query, max_price=max_price)
 
     results =  [product for product in _PRODUCTS if _matches(product, query)]
+
+    if category:
+        cat = category.lower().strip()
+        results = [product for product in results if cat in product["category"].lower()]
 
     if max_price is not None:
         results = [ product  for product in results if product["price"] <= max_price]

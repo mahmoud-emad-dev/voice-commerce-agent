@@ -34,7 +34,8 @@ MSG_STATUS      = "status"
 MSG_ERROR       = "error"
 MSG_AUDIO_CFG   = "audio_config"
 MSG_MIC_CONFIG  = "mic_config"   #  Tells browser what sample rate to capture mic at
- 
+# MSG_AUDIO_END   = "audio_end"
+
 STATUS_THINKING   = "thinking"
 STATUS_RESPONDING = "responding"
 STATUS_DONE       = "done"
@@ -165,6 +166,18 @@ class VoiceWebSocketHandler:
             # ── 2. HANDLE TEXT (Chat Box) TEXT FRAME = typed message or control JSON ─────────────
             elif raw_text is not None:
                 # ── TEXT FRAME = typed message or control JSON ─────────────
+                # try:
+                #     parsed = json.loads(raw_text)
+                # except json.JSONDecodeError:
+                #     parsed = None
+
+                # # control message from browser: user stopped speaking
+                # if isinstance(parsed, dict) and parsed.get("type") == MSG_AUDIO_END:
+                #     log.info("audio_end_received_from_browser", session_id=self.session_id)
+                #     await gemini.send_audio_stream_end()
+                #     await self._send_status(STATUS_THINKING, "Processing speech...")
+                #     continue
+
                 user_text = self._parse_text_message(raw_text)
 
                 if not user_text.strip():
@@ -212,7 +225,7 @@ class VoiceWebSocketHandler:
                 if audio_processor.is_valid_audio_chunk(audio_bytes):
                     await websocket.send_bytes(audio_bytes)
 
-            # ── OUTPUT TRANSCRIPT (Text of what Gemini SAID) ──────────────────────
+            # ──2 OUTPUT TRANSCRIPT (Text of what Gemini SAID) ──────────────────────
             elif event_type == "output_transcript":
                 ai_transcript_text: str = event["text"]
                 ai_transcript_parts.append(ai_transcript_text)
@@ -236,19 +249,19 @@ class VoiceWebSocketHandler:
                     "text": user_transcript_text
                 })
 
-            # ── TEXT CHUNK (rare in audio mode) ───────────────────────────
+            # ── 4. TEXT CHUNK (rare in audio mode) ───────────────────────────
             elif event_type == MSG_TEXT:
                 await self._send_json({
                     "type": MSG_TEXT,
                     "text": event["text"],
                 })
 
-            # ── TOOL CALL ─────────────────────────────────────────────────
+            # ── 5. TOOL CALL ─────────────────────────────────────────────────
             elif event_type == "tool_call":
                 tool_name = event.get("name", "")
                 tool_args  = event.get("args", {})
                 call_id    = event.get("call_id")
-                log.info("tool_call_received",  tool=tool_name, session=self.session_id)
+                # log.info("tool_call_received",  tool=tool_name, session=self.session_id ,call_id = call_id, args =tool_args )
 
                 # Execute the tool and get the result string AS Execute the python tool using our dispatcher
                 context = tool_dispatcher.ToolContext(session_id=self.session_id)
@@ -257,9 +270,13 @@ class VoiceWebSocketHandler:
                 # Send the result back to Gemini, referencing the call_id so Gemini knows which call this result belongs to
                 await gemini.send_tool_result(call_id, tool_name, result)
 
+            # # ── 6. INTERRUPT ─────────────────────────────────────────────────
+            # elif event_type == "interrupted":
+            #     log.info("gemini_interrupted", session_id=self.session_id)
+            #     await self._send_json({"type": "interrupted"})
 
 
-            # ── 6. TURN COMPLETE (The AI finished its thought or One complete turn) ────────────
+            # ── 7. TURN COMPLETE (The AI finished its thought or One complete turn) ────────────
             elif event_type == "turn_complete":
                 # One AI response turn finished.
                 # In voice mode: DON'T break — keep looping for the next turn.
@@ -280,7 +297,7 @@ class VoiceWebSocketHandler:
                 # Tell the browser to unlock the text box and mic button
                 await self._send_status(STATUS_DONE)
 
-            # ── 7. SESSION MANAGEMENT & ERRORS ─────────────────────────────────────────────────
+            # ── 8. SESSION MANAGEMENT & ERRORS ─────────────────────────────────────────────────
             # ── SESSION CLOSED (Gemini ended connection gracefully) ─────────
             elif event_type == "session_closed":
                 # Now we notify the browser so it can reconnect.

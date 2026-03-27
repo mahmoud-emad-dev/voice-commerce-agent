@@ -16,11 +16,10 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
             name="search_products",
             description=(
                 "Search the store's product catalog using natural language. "
-                "Call this whenever the user: asks about products, wants to find "
-                "something specific, asks what's available, mentions a product "
-                "category, asks about prices, or wants recommendations. "
-                "Returns a list of matching products with names, prices, and descriptions. "
-                "Examples: 'running shoes', 'something warm for winter', 'headphones under $200'."
+                "Use this only when the user's product intent is clear enough to search. "
+                "Do not call this for filler, partial, or ambiguous voice utterances such as "
+                "'what about', 'okay', '.', 'yes', or unfinished speech. "
+                "If the request is unclear, ask a short clarification question first."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
@@ -94,10 +93,9 @@ ADD_TO_CART_TOOL = types.Tool(
             name="add_to_cart",
             description=(
                 "Add a product to the customer's shopping cart. "
-                "ALWAYS confirm with the customer before calling this — ask "
-                "something like 'Shall I add the Nike Air Zoom to your cart?' "
-                "and wait for confirmation. Only call after explicit confirmation. "
-                "Returns confirmation with updated cart total."
+                "Only call this after the product is explicit and the customer clearly confirmed. "
+                "Do not infer confirmation from vague replies or unrelated speech. "
+                "If quantity is unclear, ask first."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
