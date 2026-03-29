@@ -19,6 +19,7 @@ from typing import Any
 import logging
 import os
 
+import httpx
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +28,8 @@ from fastapi.staticfiles import StaticFiles
 
 from voice_commerce.config.settings import settings
 from voice_commerce.api.routes import health , voice
+from voice_commerce.services import woocommerce_client
+
 log = structlog.get_logger(__name__)
 
 
@@ -75,11 +78,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
         "voice_commerce_agent_starting",
         port=settings.app_port,
         debug=settings.app_debug,
-        model=settings.gemini_model
+        model=settings.gemini_model,
+        woocommerce_configured=settings.is_woocommerce_configured,
     )
+
+    ## 1.Create WooCommerce Client
+    #-------------------------------------------------------------------------------------------------------------------
+    if settings.is_woocommerce_configured:
+        wc_client = await woocommerce_client.initialize()
+        # Store on app.state so tools can access it
+        app.state.wc_client = wc_client
+        log.info("app_startup_woocommerce_connected")
+    else:
+        log.warning("app_startup_woocommerce_skipped", 
+            message="WooCommerce keys missing from .env. Running in disconnected mode.")
+
+    #-------------------------------------------------------------------------------------------------------------------
+
+
     yield
+
     # --- SHUTDOWN ---
-    log.info("Application shutting down")
+    log.info("Application  shutting down...")
+
+    ## 1. Shutdown: close the httpx client 
+    #-------------------------------------------------------------------------------------------------------------------
+    if settings.is_woocommerce_configured:
+        await woocommerce_client.shutdown()
+        log.info("app_shutdown_woocommerce_disconnected")
+
+    #-------------------------------------------------------------------------------------------------------------------
+
+
+
+
+    log.info("Application  shut down completed")
 
 
 

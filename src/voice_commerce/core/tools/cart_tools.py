@@ -1,110 +1,112 @@
+# src/voice_commerce/core/tools/cart_tools.py
+# =============================================================================
+# PURPOSE:
+#   Cart manipulation tools for the Gemini AI.
+#
+# WHY THIS FILE EXISTS:
+#   Allows the AI to add items to the user's cart, view the cart, and remove items.
+#   It acts as the bridge between the AI's intent, the Pydantic Cart state, 
+#   and the live WooCommerce store inventory.
+# =============================================================================
+
+
 from __future__ import annotations
 
 import structlog
 
-from voice_commerce.core.tools import product_tools
+# 1. Import our Live Client and our Pydantic Models!
+from voice_commerce.services.woocommerce_client import get_client
+from voice_commerce.models.cart import Cart, CartItem
 
 log = structlog.get_logger(__name__)
 
 # Module-level dict — persists for the lifetime of the Python process.
 # Survives multiple conversation turns within one session.
 
-_CARTS: dict[str, dict[int, dict]] = {}
- 
+_CARTS: dict[str, Cart] = {} 
 
-def _get_cart(session_id: str) -> dict[int, dict]:
+def _get_cart(session_id: str) -> Cart:
     """Helper to get the cart for a session, creating it if it doesn't exist."""
     if session_id not in _CARTS:
-        _CARTS[session_id] = {}
+        _CARTS[session_id] = Cart(session_id=session_id)
     return _CARTS[session_id]
 
 
-def _cart_total(cart: dict[int, dict]) -> float:
-     return round(sum(item["price"] * item["quantity"] for item in cart.values()), 2)
-
-
-def _item_count(cart: dict[int, dict]) -> int:
-    return sum(item["quantity"] for item in cart.values())
-
+# Tools methods
 
 async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "default") -> str:
     """
-    Add a product to the customer's cart, validated against known products.
- 
-    WHY VALIDATE AGAINST THE PRODUCT LIST:
-      Gemini extracts product_id from the search results text it previously read.
-      Occasionally it hallucinates an ID. Validating before adding protects
-      the cart from "Added 5x [nonexistent product]" states.
- 
-    Phase 6: validation becomes a WooCommerce GET /products/{id} call —
-    also checks real-time stock levels and current prices.
+    Add a product to the customer's cart, validated against live WooCommerce data.
     """
 
-    log.info("add_to_cart", product_id=product_id, quantity=quantity, session=session_id)
+    log.info("add_to_cart_live", product_id=product_id, quantity=quantity, session=session_id)
 
     if quantity < 1:
         return "Please specify a quantity of 1 or more."
     
-    product = next((p for p in product_tools._PRODUCTS if p["id"] == product_id), None)
+    try:
+        # 1. Validate against LIVE WooCommerce
+        client = get_client()
+        product = await client.get_product(product_id)
+        # Handle 404 (AI hallucinated the ID or it was deleted)
+        if product is None:
+            return (
+                f"I couldn't find product ID {product_id}. "
+                "Try searching again — it may no longer be available."
+            )
+        # Handle Out of Stock
+        if not product.is_in_stock:
+            return f"Sorry, '{product.name}' is currently out of stock."
 
-    if product is None:
+        # # Handle Variations (Simple)
+        # if product.has_variations:
+        #     return (
+        #         f"'{product.name}' has variations (e.g. size, color). "
+        #         "Please specify which variation you want to add."
+        #     )
+
+        # 2. Add to our Pydantic Cart
+        cart = _get_cart(session_id)
+
+        if product_id in cart.items:
+            cart.items[product_id].quantity = quantity
+            action = "Updated"
+        else:
+            cart.items[product_id] = CartItem(
+                product_id=product.id,
+                name=product.name,
+                price=product.price,
+                quantity=quantity,
+            )
+            action = "Added"
+
+
+
+        # 3. Format the response
+        item = cart.items[product_id]
         return (
-            f"I couldn't find product ID {product_id}. "
-            "Try searching again — it may no longer be available."
+            f"{action} {item.quantity}× {item.name} "
+            f"(${item.price:.2f} each) to your cart.\n"
+            f"Cart total: ${cart.total:.2f} "
+            f"({cart.item_count} item{'s' if cart.item_count != 1 else ''})"
         )
-    if product["stock"] == "out of stock":
-            return f"Sorry, {product['name']} is currently out of stock."
     
-    cart = _get_cart(session_id)
+    except RuntimeError:
+        return "My connection to the store's database is currently offline."
+    except Exception as e:
+        log.error("tool_add_to_cart_error", error=str(e))
+        return "I'm having trouble adding that to the cart right now. Please try again."
 
 
-    if product_id in cart:
-        cart[product_id]["quantity"] = quantity
-        action = "Updated"
-    else:
-        cart[product_id] = {
-            "product_id": product_id,
-            "name": product["name"],
-            "price": product["price"],
-            "quantity": quantity,
-        }
-
-        action = "Added"
-
-    item = cart[product_id]
-    total = _cart_total(cart)
-    count = _item_count(cart)
-
-    return (
-        f"{action} {item['quantity']}× {item['name']} "
-        f"(${item['price']:.2f} each) to your cart.\n"
-        f"Cart total: ${total:.2f} "
-        f"({count} item{'s' if count != 1 else ''})"
-    )
 
     
 
 async def show_cart(session_id: str = "default") -> str:
     """Show the customer's current cart contents and total."""
     log.info("show_cart", session=session_id)
- 
     cart = _get_cart(session_id)
-    if not cart:
-        return "Your cart is empty. Would you like me to help you find something?"
- 
-    lines = ["Your cart:"]
-    for item in cart.values():
-        subtotal = round(item["price"] * item["quantity"], 2)
-        lines.append(
-            f"  • {item['quantity']}× {item['name']} "
-            f"— ${item['price']:.2f} each = ${subtotal:.2f}"
-        )
- 
-    total = _cart_total(cart)
-    count = _item_count(cart)
-    lines.append(f"\nTotal: ${total:.2f} ({count} item{'s' if count != 1 else ''})")
-    lines.append("Ready to checkout whenever you are!")
-    return "\n".join(lines)
+
+    return cart.to_tool_response()
 
 
 async def remove_from_cart(product_id: int,session_id: str = "default") -> str:
@@ -112,20 +114,19 @@ async def remove_from_cart(product_id: int,session_id: str = "default") -> str:
     log.info("remove_from_cart", product_id=product_id, session=session_id)
  
     cart = _get_cart(session_id)
-    if product_id not in cart:
+    if product_id not in cart.items:
         return (
             f"Product ID {product_id} isn't in your cart. "
             "Say 'show my cart' to see what's in it."
         )
  
-    name = cart[product_id]["name"]
-    del cart[product_id]
+    name = cart.items[product_id].name
+    del cart.items[product_id]
  
-    if not cart:
+    if cart.is_empty():
         return f"Removed {name}. Your cart is now empty."
  
-    total = _cart_total(cart)
-    return f"Removed {name} from your cart. New total: ${total:.2f}"
+    return f"Removed {name} from your cart. New total: ${cart.total:.2f}"
 
     
 
