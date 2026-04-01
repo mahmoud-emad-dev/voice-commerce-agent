@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     def woocommerce_api_url(self) -> str:
         return f"{self.wc_store_url.rstrip('/')}/wp-json/wc/v3"
 
+    # =========================================================================
+    # RAG / Vector Search SETTINGS
+    # =========================================================================
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    qdrant_collection: str = "products"
+
 # THE SINGLETON INSTANCE
 settings = Settings()
 

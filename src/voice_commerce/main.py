@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 import logging
 import os
+import asyncio
 
 import httpx
 import structlog
@@ -29,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from voice_commerce.config.settings import settings
 from voice_commerce.api.routes import health , voice
 from voice_commerce.services import woocommerce_client
+from voice_commerce.services.rag_service import get_rag_service
 
 log = structlog.get_logger(__name__)
 
@@ -89,6 +91,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
         # Store on app.state so tools can access it
         app.state.wc_client = wc_client
         log.info("app_startup_woocommerce_connected")
+
+
+        # ── PHASE 7: START RAG BRAIN SYNC ──
+        # the AI will download products and do math in the background.
+        rag = get_rag_service()
+        asyncio.create_task(rag.sync_catalog())
+        log.info("app_startup_rag_service_initialized")
     else:
         log.warning("app_startup_woocommerce_skipped", 
             message="WooCommerce keys missing from .env. Running in disconnected mode.")
@@ -147,6 +156,13 @@ def create_app() -> FastAPI:
         Root endpoint returning basic API metadata.
         """
         return {"message": "Welcome to the Voice Commerce Agent API", "version": "0.1.0"}
+    
+    # ── RAG Monitoring Endpoints (From Claude) ──
+    @app.get("/rag/stats", tags=["system"])
+    async def rag_stats():
+        """Check if the background RAG sync has finished."""
+        rag = get_rag_service()
+        return rag.stats()
     # Register other routes 
     app.include_router(health.router ,tags=["system"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
