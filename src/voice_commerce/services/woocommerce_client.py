@@ -191,7 +191,7 @@ class WooCommerceClient:
         details about a specific product they saw in search results.
  
         Returns None if the product doesn't exist (404) rather than raising.
-        The tool handles None gracefully with a "not found" message.
+        The tool handles None gracefully with a "not found" message. 
  
         Args:
             product_id: The WooCommerce numeric product ID

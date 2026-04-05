@@ -23,6 +23,7 @@ import structlog
 from voice_commerce.services import woocommerce_client
 # 2. We import our new Brain for searching
 from voice_commerce.services.rag_service import get_rag_service
+from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
 
@@ -30,12 +31,12 @@ log = structlog.get_logger(__name__)
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-async def search_products(query: str, max_price: float | None = None, category: str | None = None , session_id: str = "default",) -> str:
+async def search_products(query: str, max_price: float | None = None, category: str | None = None , session_id: str = "default",) -> ToolResponse:
     """
     Search the product catalog for items matching a natural language query.
  
     Called by the dispatcher when Gemini yields a tool_call with name="search_products".
-    Returns a formatted string Gemini reads aloud and converts to natural speech.
+    Returns a ToolResponse with a list of products for the UI, and a summary for Gemini.
  
     Args:
         query:      What the user is looking for — extracted by Gemini from speech.
@@ -50,34 +51,42 @@ async def search_products(query: str, max_price: float | None = None, category: 
         # Safety Check: If the server just booted and the background task is still downloading
         if not rag.is_ready:
             log.warning("search_attempted_while_rag_syncing")
-            return "I am currently updating my catalog database. Please give me a few seconds and try your search again."
+            return ToolResponse.error("I am currently updating my catalog database. Please give me a few seconds and try your search again.")
         # 1. Fetch semantic matches from the RAG Brain!
         products = await rag.search_products(query=query ,limit=5, max_price=max_price ) ## category=category # Uncomment if your rag.search() explicitly takes category!
         if not products:
             suffix = f" under ${max_price:.0f}" if max_price else ""
             cat_suffix = f" in {category}" if category else ""
-            return f"I didn't find anything matching '{query}'{suffix}{cat_suffix}. Try different keywords or ask me what categories we carry."
+            return ToolResponse.error(f"I didn't find anything matching '{query}'{suffix}{cat_suffix}. Try different keywords or ask me what categories we carry.")
 
-        # 2. Format the Pydantic tool summaries perfectly for the AI to read aloud
+        # 2. Gather the UI data dictionaries (using our new method on the Product model!)  
         count = len(products)
-        # 3. Build the response string
         begining_text = f"Found {count} product{'s' if count != 1 else ''} for '{query}':"
         lines = [begining_text]
+        ui_products = []
+        # 3. Process both the AI text and UI data in a single pass
         for p in products:
-            lines.append(p)
-        ending_text = "\nTo add one to your cart, just say which one."
-        lines.append(ending_text)
-        return "\n".join(lines)
+            response_dict = p.to_tool_response(detailed=False)
+            lines.append(response_dict["ai_text"])
+            ui_products.append(response_dict["data"])
+
+        lines.append("\nTo add one to your cart, just say which one.")
+        ai_text = "\n".join(lines)
+        # 4. Return the explicit ToolResponse
+        return ToolResponse.success(
+            ai_text=ai_text,
+            data={"products": ui_products}
+        )
     except RuntimeError:
         # Caught if settings are missing and WooCommerce never initialized
-        return "My connection to the store's database is currently offline."
+        return ToolResponse.error("My connection to the store's database is currently offline.")
     except Exception as e:
         log.error("search_products_error", error=str(e))
-        return "I'm having trouble accessing the semantic catalog right now. Please try again later."
+        return ToolResponse.error("I'm having trouble accessing the semantic catalog right now. Please try again later.")
 
     
 
-async def get_product_details(product_id: int, session_id: str = "default") -> str:
+async def get_product_details(product_id: int, session_id: str = "default") -> ToolResponse:
     """
     Return full details for a specific product by its ID.
  
@@ -92,18 +101,19 @@ async def get_product_details(product_id: int, session_id: str = "default") -> s
         # 1. Fetch live Pydantic Product objects
         product = await client.get_product(product_id=product_id) # Live internet search!
         if not product:
-            return (
+            return ToolResponse.error(
                 f"I couldn't find product ID {product_id}. "
                 "Try searching again — it may no longer be available."
             )
         # 4. Return the deep-dive formatting built directly into our Pydantic model!
-        return product.to_tool_detail()
+        response = product.to_tool_response(detailed=True)
+        return ToolResponse.success(ai_text=response["ai_text"], data={"product": response["data"]})
 
     except RuntimeError:
         # Caught if settings are missing and WooCommerce never initialized
-        return "My connection to the store's database is currently offline."
+        return ToolResponse.error("My connection to the store's database is currently offline.")
     except Exception as e:
         log.error("get_product_details_error", error=str(e))
-        return "I'm having trouble fetching those details right now. Please try again."
+        return ToolResponse.error("I'm having trouble fetching those details right now. Please try again.")
 
  

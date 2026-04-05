@@ -1,770 +1,1131 @@
-  <!DOCTYPE html>
-  <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Commerce Agent — Dev Test Client</title>
-    <!--
-      ============================================================
-      static/test_client.html — Phase 5: Full Voice-to-Voice
-      ============================================================
-      NEW IN PHASE 5:
-        - Microphone capture via getUserMedia() + AudioWorklet
-        - Mic audio streamed as PCM s16le binary frames to server
-        - Push-to-talk button (hold to speak, release to let Gemini respond)
-        - Keyboard shortcut: Space to hold, release to send
-        - Barge-in: user can speak while Gemini is responding
-        - User transcript shows what Gemini heard
-        - mic_config message from server controls capture sample rate
+<!DOCTYPE html>
+<html lang="en">
 
-      AUDIO ARCHITECTURE IN PHASE 5:
-        CAPTURE (browser → server):
-          AudioContext(16kHz) → getUserMedia() → MediaStreamSource
-            → AudioWorkletNode (pcm-capture-processor.js inline worklet)
-            → ArrayBuffer of Int16 chunks → WebSocket binary frames
-            → Python → gemini.send_audio_chunk() → Gemini VAD
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Commerce Agent — Phase 8 Full Client</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-        PLAYBACK (server → browser):
-          Gemini → PCM 24kHz → Python → WebSocket binary → browser
-            → playChunk() → AudioContext(24kHz) → gapless schedule → speakers
+    :root {
+      --bg: #0f0f14;
+      --surface: #1a1a24;
+      --surface2: #24243a;
+      --border: #2e2e45;
+      --accent: #7c6ef5;
+      --accent-dim: #4a3fb5;
+      --text: #e8e8f0;
+      --text-dim: #9090a8;
+      --green: #4caf86;
+      --red: #ef5350;
+      --yellow: #ffc107;
+      --orange: #ff7043;
+      --blue: #2563eb;
+      --blue-l: #eff6ff;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --radius: 10px;
+    }
 
-      WHY AUDIWORKLET (not ScriptProcessorNode):
-        ScriptProcessorNode runs on the main JS thread — audio processing
-        competes with DOM, WebSocket, and rendering causing dropouts.
-        AudioWorklet runs on a dedicated audio thread with guaranteed
-        real-time priority — no gaps regardless of main thread load.
-        ScriptProcessorNode is also deprecated in all modern browsers.
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
 
-      WHY PUSH-TO-TALK (not always-on mic):
-        Always-on VAD is ideal but harder to implement cleanly:
-          - Gemini's VAD handles pauses well but sometimes cuts off
-          - Echo cancellation is complex (Gemini's audio comes out of
-            speakers and could be re-captured by the mic)
-        Push-to-talk is deterministic: mic is ONLY active when button is held.
-        This eliminates all echo issues and gives the user full control.
-        Barge-in still works: hold button while Gemini is speaking to interrupt.
-      ============================================================
-    -->
-    <style>
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      :root {
-        --bg: #0f0f14; --surface: #1a1a24; --surface2: #24243a; --border: #2e2e45;
-        --accent: #7c6ef5; --accent-dim: #4a3fb5;
-        --text: #e8e8f0; --text-dim: #9090a8;
-        --green: #4caf86; --red: #ef5350; --yellow: #ffc107; --orange: #ff7043;
-        --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    /* ── App Layout (Split Screen) ── */
+    .app-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 800px) {
+      .app-layout {
+        grid-template-columns: 1fr;
       }
-      body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px 48px; }
+    }
 
-      .header { width: 100%; max-width: 720px; margin-bottom: 16px; }
-      .header h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
-      .header .subtitle { font-size: 12px; color: var(--text-dim); }
+    .chat-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
 
-      /* ── Top status bar ── */
-      .top-bar { width: 100%; max-width: 720px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
-      .status-pill { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
-      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); transition: background .3s; flex-shrink: 0; }
-      .dot.connected { background: var(--green); }
-      .dot.disconnected { background: var(--red); }
+    .store-column {
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      max-height: 85vh;
+    }
 
-      /* Audio playing bars */
-      .audio-bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; opacity: 0; transition: opacity .2s; }
-      .audio-bars.active { opacity: 1; }
-      .audio-bars span { display: block; width: 3px; background: var(--accent); border-radius: 2px; transform-origin: bottom; animation: bars .8s ease-in-out infinite; }
-      .audio-bars span:nth-child(1){height:6px;animation-delay:0s}
-      .audio-bars span:nth-child(2){height:12px;animation-delay:.15s}
-      .audio-bars span:nth-child(3){height:8px;animation-delay:.3s}
-      .audio-bars span:nth-child(4){height:14px;animation-delay:.1s}
-      .audio-bars span:nth-child(5){height:6px;animation-delay:.25s}
-      @keyframes bars { 0%,100%{transform:scaleY(.4)} 50%{transform:scaleY(1)} }
+    .header {
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
 
-      /* Mic recording indicator */
-      .mic-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--red); opacity: 0; transition: opacity .2s; }
-      .mic-indicator.active { opacity: 1; }
-      .mic-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: micPulse 1s ease-in-out infinite; }
-      @keyframes micPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.7)} }
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
 
-      .vol-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
-      .vol-row input { width: 70px; accent-color: var(--accent); }
+    .header .subtitle {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
 
-      .phase-badge { display: inline-block; font-size: 11px; font-weight: 600; background: var(--surface2); border: 1px solid var(--accent-dim); color: var(--accent); padding: 3px 10px; border-radius: 20px; margin-bottom: 12px; }
+    /* ── Top status bar ── */
+    .top-bar {
+      width: 100%;
+      max-width: 720px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
 
-      /* ── Chat window ── */
-      #chat { width: 100%; max-width: 720px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-height: 300px; max-height: 440px; overflow-y: auto; margin-bottom: 12px; scroll-behavior: smooth; }
-      .msg { padding: 10px 14px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; line-height: 1.55; max-width: 86%; word-break: break-word; }
-      .msg.user { background: var(--accent-dim); margin-left: auto; text-align: right; border-bottom-right-radius: 2px; }
-      .msg.ai   { background: var(--surface2); border-bottom-left-radius: 2px; }
-      .msg.sys  { background: transparent; color: var(--text-dim); font-size: 12px; text-align: center; max-width: 100%; border: 1px dashed var(--border); }
-      .msg.err  { background: #3a1a1a; color: #ff8080; border: 1px solid var(--red); max-width: 100%; }
-      .msg.transcript-user { background: transparent; color: var(--text-dim); font-size: 12px; font-style: italic; max-width: 100%; padding: 2px 14px; border-left: 2px solid var(--border); }
-      .msg.transcript-ai   { background: transparent; color: var(--text-dim); font-size: 12px; font-style: italic; max-width: 88%; padding: 2px 14px; border-left: 2px solid var(--accent-dim); }
-      .msg-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin-bottom: 5px; }
-      .msg.user .msg-label { color: #a090e8; }
-      .msg.ai   .msg-label { color: var(--accent); }
-      .msg.ai.streaming::after { content: '▋'; animation: blink 1s step-end infinite; color: var(--accent); }
-      @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
 
-      /* ── Controls area ── */
-      .controls { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--yellow);
+      transition: background .3s;
+      flex-shrink: 0;
+    }
 
-      /* Mic button — the primary control in Phase 5 */
-      .mic-row { display: flex; align-items: center; gap: 12px; justify-content: center; }
-      #mic-btn {
-        width: 72px; height: 72px; border-radius: 50%;
-        border: 3px solid var(--accent-dim);
-        background: var(--surface2);
-        color: var(--text); font-size: 28px; cursor: pointer;
-        transition: all .15s; display: flex; align-items: center; justify-content: center;
-        user-select: none; -webkit-user-select: none;
-        touch-action: none; /* prevents scroll on mobile long-press */
+    .dot.connected {
+      background: var(--green);
+    }
+
+    .dot.disconnected {
+      background: var(--red);
+    }
+
+    .audio-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 16px;
+      opacity: 0;
+      transition: opacity .2s;
+    }
+
+    .audio-bars.active {
+      opacity: 1;
+    }
+
+    .audio-bars span {
+      display: block;
+      width: 3px;
+      background: var(--accent);
+      border-radius: 2px;
+      transform-origin: bottom;
+      animation: bars .8s ease-in-out infinite;
+    }
+
+    .audio-bars span:nth-child(1) {
+      height: 6px;
+      animation-delay: 0s
+    }
+
+    .audio-bars span:nth-child(2) {
+      height: 12px;
+      animation-delay: .15s
+    }
+
+    .audio-bars span:nth-child(3) {
+      height: 8px;
+      animation-delay: .3s
+    }
+
+    .audio-bars span:nth-child(4) {
+      height: 14px;
+      animation-delay: .1s
+    }
+
+    .audio-bars span:nth-child(5) {
+      height: 6px;
+      animation-delay: .25s
+    }
+
+    @keyframes bars {
+
+      0%,
+      100% {
+        transform: scaleY(.4)
       }
-      #mic-btn:hover:not(:disabled) { border-color: var(--accent); background: #2a2a4a; }
-      #mic-btn.recording { background: var(--red); border-color: var(--red); transform: scale(1.08); box-shadow: 0 0 0 8px rgba(239,83,80,.15); }
-      #mic-btn:disabled  { opacity: .4; cursor: not-allowed; }
 
-      .mic-hint { font-size: 12px; color: var(--text-dim); text-align: center; }
-
-      /* Text input row — secondary input method */
-      .text-row { display: flex; gap: 10px; }
-      #text-input {
-        flex: 1; background: var(--surface); border: 1px solid var(--border);
-        border-radius: 8px; color: var(--text); font-family: var(--font);
-        font-size: 14px; padding: 10px 14px; outline: none; transition: border-color .2s;
+      50% {
+        transform: scaleY(1)
       }
-      #text-input:focus { border-color: var(--accent); }
-      #text-input::placeholder { color: var(--text-dim); }
-      #text-input:disabled { opacity: .5; cursor: not-allowed; }
-      #send-btn {
-        background: var(--accent); color: #fff; border: none; border-radius: 8px;
-        font-size: 14px; font-weight: 500; padding: 10px 20px; cursor: pointer;
-        transition: background .2s, transform .1s;
+    }
+
+    .mic-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--red);
+      opacity: 0;
+      transition: opacity .2s;
+    }
+
+    .mic-indicator.active {
+      opacity: 1;
+    }
+
+    .mic-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+      animation: micPulse 1s ease-in-out infinite;
+    }
+
+    @keyframes micPulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1)
       }
-      #send-btn:hover:not(:disabled) { background: #6a5ce0; }
-      #send-btn:active:not(:disabled) { transform: scale(.97); }
-      #send-btn:disabled { background: var(--surface2); color: var(--text-dim); cursor: not-allowed; }
 
-      .divider { text-align: center; font-size: 11px; color: var(--text-dim); margin: 2px 0; }
+      50% {
+        opacity: .5;
+        transform: scale(.7)
+      }
+    }
 
-      /* ── Debug bar ── */
-      .debug { width: 100%; max-width: 720px; margin-top: 14px; font-size: 11px; color: var(--text-dim); font-family: monospace; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 12px; }
-      .debug strong { color: var(--text); }
-    </style>
-  </head>
-  <body>
+    .vol-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
 
-  <div class="header">
-    <h1>Voice Commerce Agent</h1>
-    <p class="subtitle">Phase 5 — Full voice-to-voice · Click mic to speak, click again to stop</p>
+    .vol-row input {
+      width: 70px;
+      accent-color: var(--accent);
+    }
+
+    .phase-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--surface2);
+      border: 1px solid var(--accent-dim);
+      color: var(--accent);
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+
+    /* ── Chat window ── */
+    #chat {
+      width: 100%;
+      max-width: 720px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 300px;
+      max-height: 400px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      scroll-behavior: smooth;
+    }
+
+    .msg {
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      line-height: 1.55;
+      max-width: 86%;
+      word-break: break-word;
+    }
+
+    .msg.user {
+      background: var(--accent-dim);
+      margin-left: auto;
+      text-align: right;
+      border-bottom-right-radius: 2px;
+    }
+
+    .msg.ai {
+      background: var(--surface2);
+      border-bottom-left-radius: 2px;
+    }
+
+    .msg.sys {
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 12px;
+      text-align: center;
+      max-width: 100%;
+      border: 1px dashed var(--border);
+    }
+
+    .msg.err {
+      background: #3a1a1a;
+      color: #ff8080;
+      border: 1px solid var(--red);
+      max-width: 100%;
+    }
+
+    .msg.transcript-user {
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 12px;
+      font-style: italic;
+      max-width: 100%;
+      padding: 2px 14px;
+      border-left: 2px solid var(--border);
+    }
+
+    .msg-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+    }
+
+    .msg.user .msg-label {
+      color: #a090e8;
+    }
+
+    .msg.ai .msg-label {
+      color: var(--accent);
+    }
+
+    .msg.ai.streaming::after {
+      content: '▋';
+      animation: blink 1s step-end infinite;
+      color: var(--accent);
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0
+      }
+    }
+
+    /* ── Controls area ── */
+    .controls {
+      width: 100%;
+      max-width: 720px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .mic-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    #mic-btn {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 3px solid var(--accent-dim);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 28px;
+      cursor: pointer;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+    }
+
+    #mic-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: #2a2a4a;
+    }
+
+    #mic-btn.recording {
+      background: var(--red);
+      border-color: var(--red);
+      transform: scale(1.08);
+      box-shadow: 0 0 0 8px rgba(239, 83, 80, .15);
+    }
+
+    #mic-btn:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .mic-hint {
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: center;
+      margin-top: 5px;
+    }
+
+    .text-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    #text-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    #text-input:focus {
+      border-color: var(--accent);
+    }
+
+    #send-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+
+    /* ── Store Area ── */
+    .store-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--surface2);
+      font-weight: bold;
+    }
+
+    .store-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      padding: 14px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .product-card {
+      border: 2px solid transparent;
+      border-radius: 8px;
+      padding: 10px;
+      background: var(--surface2);
+      transition: all .3s;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .product-card .name {
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+
+    .product-card .price {
+      color: var(--green);
+      font-weight: bold;
+    }
+
+    .product-card.vc-highlighted {
+      border-color: var(--accent) !important;
+      background: #2c2560 !important;
+      box-shadow: 0 0 0 4px rgba(124, 110, 245, 0.2);
+      transform: scale(1.02);
+    }
+
+    /* ── Action Log ── */
+    #actionsLog {
+      height: 150px;
+      overflow-y: auto;
+      font-size: 11.5px;
+      font-family: monospace;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-top: 1px solid var(--border);
+      background: #0a0a0f;
+    }
+
+    .act-entry {
+      padding: 6px 8px;
+      border-radius: 4px;
+      display: flex;
+      gap: 8px;
+      border-left: 3px solid var(--accent);
+      background: rgba(255, 255, 255, 0.05);
+      color: #ccc;
+    }
+
+    .act-time {
+      color: #888;
+      font-size: 10px;
+    }
+
+    /* ── Cart Drawer & Badge ── */
+    .cart-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      background: var(--surface2);
+      color: #fff;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+    }
+
+    #cartBadge {
+      background: var(--red);
+      color: #fff;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      display: none;
+    }
+
+    #cartBadge.visible {
+      display: inline-block;
+    }
+
+    #cartDrawer {
+      position: fixed;
+      right: -300px;
+      top: 0;
+      width: 300px;
+      height: 100%;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      box-shadow: -4px 0 20px rgba(0, 0, 0, .5);
+      transition: right .3s;
+      z-index: 999;
+      padding: 20px 16px;
+    }
+
+    #cartDrawer.open {
+      right: 0;
+    }
+
+    .close-drawer {
+      float: right;
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: var(--text-dim);
+    }
+
+    /* ── Toasts & Modals ── */
+    #toastContainer {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transform: translateX(20px);
+      transition: opacity .25s, transform .25s;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .toast.success {
+      background: #1b452d;
+      border: 1px solid var(--green);
+      color: #86efac;
+    }
+
+    .toast.error {
+      background: #4a1919;
+      border: 1px solid var(--red);
+      color: #fca5a5;
+    }
+
+    .toast.info {
+      background: #16264a;
+      border: 1px solid var(--blue);
+      color: #93c5fd;
+    }
+
+    #productModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1100;
+      background: rgba(0, 0, 0, .7);
+      align-items: center;
+      justify-content: center;
+    }
+
+    #productModal.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 400px;
+      width: 90%;
+    }
+
+    .modal-close {
+      margin-top: 16px;
+      width: 100%;
+      padding: 10px;
+      background: var(--surface2);
+      color: white;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="toastContainer"></div>
+
+  <div id="cartDrawer">
+    <button class="close-drawer" onclick="closeCartDrawer()">×</button>
+    <h3 style="margin-bottom: 20px; font-size: 18px;">🛒 Your Cart</h3>
+    <div id="cartItems" style="color: var(--text-dim); font-size: 14px;">Your cart is empty.</div>
   </div>
 
-  <div class="top-bar">
-    <div class="status-pill">
-      <div class="dot" id="conn-dot"></div>
-      <span id="conn-text">Connecting...</span>
+  <div id="productModal">
+    <div class="modal-box">
+      <h3 id="modalTitle" style="font-size: 20px; margin-bottom: 10px; color: var(--accent)">Product</h3>
+      <p id="modalBody" style="color: var(--text-dim); line-height: 1.5; margin-bottom: 20px;">Loading product
+        details...</p>
+      <button class="modal-close" onclick="closeModal()">Close Window</button>
     </div>
-    <div style="display:flex;align-items:center;gap:14px">
-      <div class="mic-indicator" id="mic-ind">
-        <div class="mic-dot"></div>
-        <span>Recording</span>
+  </div>
+
+  <div class="app-layout">
+
+    <div class="chat-column">
+      <div class="header">
+        <div>
+          <h1>Voice Commerce Agent</h1>
+          <p class="subtitle">Phase 8 — Connected to Live WooCommerce Export</p>
+        </div>
+        <button class="cart-btn" onclick="toggleCartDrawer()">
+          🛒 Cart <span id="cartBadge">0</span>
+        </button>
       </div>
-      <div class="audio-bars" id="audio-bars">
-        <span></span><span></span><span></span><span></span><span></span>
+
+      <div class="top-bar">
+        <div class="status-pill">
+          <div class="dot" id="conn-dot"></div>
+          <span id="conn-text">Connecting...</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div class="mic-indicator" id="mic-ind">
+            <div class="mic-dot"></div><span>Recording</span>
+          </div>
+          <div class="audio-bars" id="audio-bars"><span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="vol-row">Vol <input type="range" id="vol" min="0" max="1" step=".05" value=".9"></div>
+        </div>
       </div>
-      <div class="vol-row">Vol <input type="range" id="vol" min="0" max="1" step=".05" value=".9"></div>
-    </div>
-  </div>
 
-  <div class="phase-badge">Phase 5 · Voice-to-Voice</div>
+      <div id="chat">
+        <div class="msg sys">Click the mic button (or press Space) to start speaking.</div>
+      </div>
 
-  <div id="chat">
-    <div class="msg sys">
-      Click the mic button (or press Space) to start speaking. Click again when done — the assistant will respond. You can also type below.
-    </div>
-  </div>
-
-  <div class="controls">
-    <div class="mic-row">
-      <div>
-        <button id="mic-btn" disabled title="Click to speak (or press Space)">🎤</button>
-        <div class="mic-hint" id="mic-hint">Requesting mic permission...</div>
+      <div class="controls">
+        <div class="mic-row">
+          <div>
+            <button id="mic-btn" disabled title="Click to speak">🎤</button>
+            <div class="mic-hint" id="mic-hint">Requesting mic...</div>
+          </div>
+        </div>
+        <div style="text-align:center; color: var(--text-dim); font-size: 12px;">— or type below —</div>
+        <div class="text-row">
+          <input id="text-input" type="text" placeholder="Type a message..." disabled autocomplete="off">
+          <button id="send-btn" disabled>Send</button>
+        </div>
       </div>
     </div>
 
-    <div class="divider">— or type below —</div>
-
-    <div class="text-row">
-      <input id="text-input" type="text"
-        placeholder="Type a message... (e.g. 'show me running shoes')"
-        disabled autocomplete="off">
-      <button id="send-btn" disabled>Send</button>
+    <div class="store-column">
+      <div class="store-header">
+        <span>🛍️ Live Store Catalog</span>
+        <span style="font-size: 12px; font-weight: normal; color: var(--text-dim);" id="storeCount">Loading...</span>
+      </div>
+      <div class="store-grid" id="storeGrid">
+      </div>
+      <div id="actionsLog">
+        <div style="color:var(--text-dim);font-size:11px;">UI Action Commands will appear here...</div>
+      </div>
     </div>
+
   </div>
 
-  <div class="debug">
-    <span><strong>WS:</strong> ws://localhost:8000/ws/voice</span>
-    <span><strong>Session:</strong> <span id="dbg-sid">—</span></span>
-    <span><strong>Capture:</strong> <span id="dbg-cap">—</span></span>
-    <span><strong>Playback:</strong> <span id="dbg-play">—</span></span>
-    <span><strong>Chunks sent:</strong> <span id="dbg-sent">0</span></span>
-    <span><strong>Chunks received:</strong> <span id="dbg-recv">0</span></span>
-    <span><strong>Turns:</strong> <span id="dbg-turns">0</span></span>
-  </div>
-
-  <!--
-    ============================================================
-    AUDIWORKLET PROCESSOR — inline as a Blob URL
-    ============================================================
-    WHY INLINE (not a separate .js file):
-      AudioWorklet processors must be loaded via audioCtx.audioWorklet.addModule(url).
-      Serving a separate file requires an extra HTTP request and correct MIME type.
-      By encoding the processor as a Blob URL, we avoid a separate file AND
-      the MIME type issue — everything stays in this single HTML file.
-
-    WHAT THE PROCESSOR DOES:
-      Runs on the dedicated audio thread (not the main JS thread).
-      Receives Float32 audio samples from the microphone in 128-sample blocks.
-      Accumulates them in a 4096-sample buffer.
-      When the buffer is full, converts Float32 → Int16 (PCM s16le) and
-      posts the raw bytes to the main thread via postMessage.
-      The main thread then sends them over WebSocket as binary frames.
-
-    Float32 → Int16 CONVERSION (reverse of playback conversion):
-      Playback:  Int16 / 32768.0 → Float32   (used in playChunk)
-      Capture:   Float32 * 32767  → Int16    (used in worklet processor)
-      The 32767 (not 32768) cap prevents the +32768 overflow that would wrap
-      to -32768 on a +1.0 float sample.
-  -->
   <script id="worklet-src" type="text/plain">
-  class PcmCaptureProcessor extends AudioWorkletProcessor {
-    constructor(options) {
-      super();
-      // Chunk size: how many samples to accumulate before sending.
-      // 4096 samples at 16kHz = 256ms per chunk.
-      // Smaller = more WebSocket messages (overhead), smaller latency.
-      // Larger = fewer messages, higher latency before Gemini hears anything.
-      // 4096 is the sweet spot confirmed in tests.
-      this._chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4096;
-      this._buffer = new Float32Array(this._chunkSamples);
-      this._bufferIdx = 0;
-      this._active = true; // FIX: was false — silenced all mic audio
-    }
-
-    process(inputs) {
-      // inputs[0][0] = Float32Array of 128 samples from the microphone.
-      // The Web Audio API always delivers in 128-sample blocks regardless
-      // of our output chunk size. We accumulate into _buffer until full.
-      if (!this._active) return true; // Processor stays alive but silent
-
-      const input = inputs[0][0];
-      if (!input) return true;
-
-      for (let i = 0; i < input.length; i++) {
-        this._buffer[this._bufferIdx++] = input[i];
-
-        if (this._bufferIdx >= this._chunkSamples) {
-          // Buffer full — convert Float32 → Int16 and send to main thread
-          const int16 = new Int16Array(this._chunkSamples);
-          for (let j = 0; j < this._chunkSamples; j++) {
-            // Clamp to [-1.0, 1.0] then scale to int16 range.
-            // Math.max/min clamp prevents values outside ±1.0 from wrapping.
-            const clamped = Math.max(-1, Math.min(1, this._buffer[j]));
-            int16[j] = clamped < 0
-              ? clamped * 32768   // negative: multiply by 32768
-              : clamped * 32767;  // positive: multiply by 32767 (avoids +32768 overflow)
-          }
-          // Transfer the ArrayBuffer to main thread (zero-copy — no clone)
-          this.port.postMessage({ type: 'chunk', buffer: int16.buffer }, [int16.buffer]);
-          this._bufferIdx = 0;
-        }
-      }
-      return true; // Must return true to keep processor alive
-    }
+class PcmCaptureProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this._chunkSamples = (options.processorOptions && options.processorOptions.chunkSamples) || 4096;
+    this._buffer = new Float32Array(this._chunkSamples);
+    this._bufferIdx = 0;
+    this._active = true; 
   }
-
-  // The globalThis.currentFrame and sampleRate are available in AudioWorklet scope.
-  // Expose the processor class to the AudioWorklet registry by this name.
-  registerProcessor('pcm-capture-processor', PcmCaptureProcessor);
-  </script>
+  process(inputs) {
+    if (!this._active) return true; 
+    const input = inputs[0][0];
+    if (!input) return true;
+    for (let i = 0; i < input.length; i++) {
+      this._buffer[this._bufferIdx++] = input[i];
+      if (this._bufferIdx >= this._chunkSamples) {
+        const int16 = new Int16Array(this._chunkSamples);
+        for (let j = 0; j < this._chunkSamples; j++) {
+          const clamped = Math.max(-1, Math.min(1, this._buffer[j]));
+          int16[j] = clamped < 0 ? clamped * 32768 : clamped * 32767;
+        }
+        this.port.postMessage({ type: 'chunk', buffer: int16.buffer }, [int16.buffer]);
+        this._bufferIdx = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-capture-processor', PcmCaptureProcessor);
+</script>
 
   <script>
-  // ============================================================
-  // STATE
-  // ============================================================
-  let ws = null;
+    // ============================================================
+    // 1. YOUR LIVE WOOCOMMERCE EXPORT DATA
+    // ============================================================
+    const MOCK_PRODUCTS = [
+      { "id": 17, "name": "Nike Air Max 270", "price": "$120.00" },
+      { "id": 18, "name": "Nike Pegasus 40", "price": "$140.00" },
+      { "id": 19, "name": "Adidas Ultraboost 22", "price": "$180.00" },
+      { "id": 20, "name": "Adidas NMD R1", "price": "$150.00" },
+      { "id": 21, "name": "Puma RS-X", "price": "$110.00" },
+      { "id": 22, "name": "Nike Metcon 9", "price": "$150.00" },
+      { "id": 23, "name": "Reebok Nano X3", "price": "$130.00" },
+      { "id": 24, "name": "Under Armour HOVR Phantom", "price": "$125.00" },
+      { "id": 25, "name": "Nike Basketball Elite", "price": "$160.00" },
+      { "id": 26, "name": "Adidas Harden Vol 7", "price": "$170.00" },
+      { "id": 27, "name": "Nike Zoom Fly 5", "price": "$100.00" },
+      { "id": 28, "name": "Nike React Infinity Run", "price": "$101.00" },
+      { "id": 29, "name": "Adidas Solar Glide 6", "price": "$102.00" },
+      { "id": 30, "name": "Adidas Adizero Boston 12", "price": "$103.00" },
+      { "id": 31, "name": "Puma Velocity Nitro", "price": "$104.00" },
+      { "id": 32, "name": "Under Armour Charged Rogue", "price": "$105.00" },
+      { "id": 33, "name": "Nike Air Force 1", "price": "$106.00" },
+      { "id": 34, "name": "Nike Dunk Low Retro", "price": "$107.00" },
+      { "id": 35, "name": "Adidas Samba OG", "price": "$108.00" },
+      { "id": 36, "name": "Adidas Gazelle", "price": "$109.00" },
+      { "id": 37, "name": "Puma Suede Classic", "price": "$110.00" },
+      { "id": 38, "name": "Reebok Club C 85", "price": "$111.00" },
+      { "id": 39, "name": "Nike Free Metcon 5", "price": "$112.00" },
+      { "id": 40, "name": "Adidas Dropset Trainer", "price": "$113.00" },
+      { "id": 41, "name": "Puma Fuse 2.0", "price": "$114.00" },
+      { "id": 42, "name": "Reebok Flexagon Force", "price": "$115.00" },
+      { "id": 43, "name": "Under Armour Tribase Reign", "price": "$116.00" },
+      { "id": 44, "name": "Nike Dri-FIT Training T-Shirt", "price": "$117.00" },
+      { "id": 45, "name": "Nike Sportswear Club Hoodie", "price": "$118.00" },
+      { "id": 46, "name": "Adidas Essentials Hoodie", "price": "$119.00" },
+      { "id": 47, "name": "Adidas Own The Run T-Shirt", "price": "$120.00" },
+      { "id": 48, "name": "Puma Training Shorts", "price": "$121.00" },
+      { "id": 49, "name": "Nike Windrunner Jacket", "price": "$122.00" },
+      { "id": 50, "name": "Adidas Tiro Training Jacket", "price": "$123.00" },
+      { "id": 51, "name": "Nike Elite Backpack", "price": "$124.00" },
+      { "id": 52, "name": "Adidas Classic Backpack", "price": "$125.00" },
+      { "id": 53, "name": "Nike Performance Socks", "price": "$126.00" },
+      { "id": 54, "name": "Adidas Cushioned Crew Socks", "price": "$127.00" },
+      { "id": 55, "name": "Puma Training Cap", "price": "$128.00" },
+      { "id": 56, "name": "Under Armour Blitzing Cap", "price": "$129.00" },
+      { "id": 57, "name": "Nike Air Zoom Structure", "price": "$130.00" },
+      { "id": 58, "name": "Adidas Supernova", "price": "$131.00" },
+      { "id": 59, "name": "Puma Deviate Nitro", "price": "$132.00" },
+      { "id": 60, "name": "Under Armour Flow Velociti", "price": "$133.00" },
+      { "id": 61, "name": "Nike Blazer Mid 77", "price": "$134.00" },
+      { "id": 62, "name": "Adidas Forum Low", "price": "$135.00" },
+      { "id": 63, "name": "Nike Sports Backpack", "price": "$136.00" },
+      { "id": 64, "name": "Adidas Running Cap", "price": "$137.00" },
+      { "id": 65, "name": "Puma Performance Tee", "price": "$138.00" },
+      { "id": 66, "name": "Under Armour Gym Shorts", "price": "$139.00" }
+    ];
 
-  // PLAYBACK AudioContext — created when audio_config arrives (24kHz)
-  let playCtx = null;
-  let gainNode = null;
-  let nextStartAt = 0;
-  let recvChunks = 0;
-
-  // CAPTURE AudioContext — created when mic_config arrives (16kHz)
-  let captureCtx = null;
-  let workletNode = null;
-  let micSource = null; // stored so stopRecording can disconnect it
-  let micStream = null;
-  let isRecording = false;
-  let sentChunks = 0;
-
-  // Session
-  let sessionId = (() => {
-    let id = sessionStorage.getItem('vca5_sid');
-    if (!id) { id = 'v5_' + Math.random().toString(36).slice(2,10); sessionStorage.setItem('vca5_sid', id); }
-    return id;
-  })();
-  let turnCount = 0;
-  let currentAiEl = null;
-  // Accumulates input_transcript words into one bubble per user turn
-  let currentUserTranscriptEl = null;
-  // True while Gemini is generating audio — mic must NOT send during this time
-  // to avoid 1008 "Operation not supported" from the Gemini API
-  let geminiSpeaking = false;
-
-  document.getElementById('dbg-sid').textContent = sessionId.slice(0,12) + '...';
-
-  // ============================================================
-  // PLAYBACK ENGINE  (server → browser audio)
-  // ============================================================
-  // Same gapless scheduling as Phase 4. Initialised from audio_config.
-
-  function initPlayback(sr) {
-    if (playCtx && playCtx.sampleRate === sr) return;
-    if (playCtx) playCtx.close();
-    playCtx = new AudioContext({ sampleRate: sr });
-    gainNode = playCtx.createGain();
-    gainNode.gain.value = parseFloat(document.getElementById('vol').value);
-    gainNode.connect(playCtx.destination);
-    nextStartAt = 0;
-    document.getElementById('dbg-play').textContent = `PCM s16le @ ${sr}Hz`;
-  }
-
-  document.getElementById('vol').addEventListener('input', function() {
-    if (gainNode) gainNode.gain.setTargetAtTime(parseFloat(this.value), playCtx.currentTime, 0.015);
-  });
-
-  async function playChunk(buf) {
-    if (!playCtx) return;
-    if (playCtx.state === 'suspended') await playCtx.resume();
-
-    const pcm = new Int16Array(buf);
-    const f32 = new Float32Array(pcm.length);
-    for (let i = 0; i < pcm.length; i++) f32[i] = pcm[i] / 32768.0;
-
-    const ab = playCtx.createBuffer(1, f32.length, playCtx.sampleRate);
-    ab.getChannelData(0).set(f32);
-
-    const src = playCtx.createBufferSource();
-    src.buffer = ab;
-    src.connect(gainNode);
-
-    const now = playCtx.currentTime;
-    const at = Math.max(now, nextStartAt);
-    src.start(at);
-    nextStartAt = at + ab.duration;
-
-    recvChunks++;
-    document.getElementById('dbg-recv').textContent = recvChunks;
-    document.getElementById('audio-bars').classList.add('active');
-    src.onended = () => {
-      if (playCtx.currentTime >= nextStartAt - 0.05) {
-        document.getElementById('audio-bars').classList.remove('active');
-      }
-    };
-  }
-
-  // ============================================================
-  // MICROPHONE CAPTURE ENGINE  (browser → server audio)
-  // ============================================================
-
-  /**
-   * Request microphone access and set up the AudioWorklet capture pipeline.
-   *
-   * PIPELINE:
-   *   getUserMedia() → MediaStream
-   *     → createMediaStreamSource(stream)
-   *     → AudioWorkletNode('pcm-capture-processor')
-   *     → messages of Int16 PCM chunks → WebSocket binary frames
-   *
-   * WHY NOT connect workletNode to captureCtx.destination:
-   *   We don't want to hear our own microphone through the speakers (feedback!).
-   *   The worklet only needs to receive audio — it doesn't need to output anything.
-   *   So we deliberately do NOT connect the worklet's output to destination.
-   *
-   * @param {number} sampleRate - from mic_config (16000)
-   */
-  async function initCapture(sampleRate) {
-    if (captureCtx && captureCtx.sampleRate === sampleRate) {
-      return; // Already initialised at the right rate
-    }
-
-    // Build the AudioWorklet processor from the inline script tag as a Blob URL.
-    // WHY BLOB URL: AudioWorklet.addModule() requires a URL, not inline code.
-    // Blob URLs are created from in-memory data — no server request needed.
-    const workletCode = document.getElementById('worklet-src').textContent;
-    const blob = new Blob([workletCode], { type: 'application/javascript' });
-    const blobUrl = URL.createObjectURL(blob);
-
-    // Create a NEW AudioContext at the capture sample rate (16kHz).
-    // CANNOT reuse playCtx — it's at 24kHz. Web Audio API does not resample
-    // within a context, so we need a separate context for each sample rate.
-    if (captureCtx) await captureCtx.close();
-    // Very important
-    captureCtx = new AudioContext({ 
-      sampleRate: sampleRate,
-      latencyHint: 'interactive' 
-    });
-
-    // Register the worklet processor class in this AudioContext's worklet scope
-    await captureCtx.audioWorklet.addModule(blobUrl);
-    URL.revokeObjectURL(blobUrl); // Clean up the Blob URL — processor is registered
-
-    document.getElementById('dbg-cap').textContent = `PCM s16le @ ${sampleRate}Hz`;
-    document.getElementById('mic-btn').disabled = false;
-    document.getElementById('mic-hint').textContent = 'Click to speak (or press Space)';
-  }
-
-  /**
-   * Start microphone capture and stream audio to the server.
-   * Called when the user presses and holds the mic button.
-   */
-  async function startRecording() {
-    if (isRecording) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (!captureCtx) return;
-    // CRITICAL: Do not send audio while Gemini is responding.
-    // The gemini-2.5-flash-native-audio model returns 1008 "Operation not
-    // supported" if send_realtime_input() is called while it is generating.
-    // may Comment
-    if (geminiSpeaking) {
-      addMsg('sys', '⏳ Wait for the assistant to finish before speaking.');
-      return;
-    }
-
-    // getUserMedia() shows the browser's permission dialog on first call.
-    // Subsequent calls reuse the previously granted permission.
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // These constraints improve speech quality and reduce background noise.
-          // All are "hints" — the browser may ignore some on certain devices.
-          // we need to test them 
-          sampleRate: captureCtx.sampleRate,  // Request the right rate
-          channelCount: 1,                     // Mono
-          echoCancellation: true,              // Removes Gemini's audio from mic
-          noiseSuppression: true,              // Reduces keyboard/background noise
-          autoGainControl: true,               // Normalises quiet voices
-        }
+    function buildStore() {
+      const grid = document.getElementById("storeGrid");
+      document.getElementById("storeCount").textContent = `${MOCK_PRODUCTS.length} Items`;
+      MOCK_PRODUCTS.forEach(p => {
+        const el = document.createElement("div");
+        el.className = "product-card";
+        el.dataset.productId = p.id;
+        el.innerHTML = `<div class="name">${p.name}</div><div class="price">${p.price}</div>
+                    <div style="font-size:10px; color:gray; margin-top:4px;">ID: ${p.id}</div>`;
+        grid.appendChild(el);
       });
-    } catch (err) {
-      addMsg('err', `Microphone error: ${err.message}. Check browser permissions.`);
-      document.getElementById('mic-hint').textContent = 'Mic permission denied';
-      return;
+    }
+    buildStore();
+
+    // ============================================================
+    // 2. STATE & AUDIO ENGINE 
+    // ============================================================
+    let ws = null;
+    let playCtx = null; let gainNode = null; let nextStartAt = 0;
+    let captureCtx = null; let workletNode = null; let micSource = null; let micStream = null;
+    let isRecording = false; let geminiSpeaking = false;
+    let currentAiEl = null; let currentUserTranscriptEl = null;
+    let sessionId = (() => { let id = sessionStorage.getItem('vca5_sid'); if (!id) { id = 'v5_' + Math.random().toString(36).slice(2, 10); sessionStorage.setItem('vca5_sid', id); } return id; })();
+
+    function initPlayback(sr) {
+      if (playCtx && playCtx.sampleRate === sr) return;
+      if (playCtx) playCtx.close();
+      playCtx = new AudioContext({ sampleRate: sr });
+      gainNode = playCtx.createGain();
+      gainNode.gain.value = parseFloat(document.getElementById('vol').value);
+      gainNode.connect(playCtx.destination);
+      nextStartAt = 0;
     }
 
-    micStream = stream;
-
-    // Resume AudioContext if suspended (browser autoplay policy)
-    if (captureCtx.state === 'suspended') await captureCtx.resume();
-
-    // Connect: microphone → worklet processor
-    const source = captureCtx.createMediaStreamSource(micStream);
-    micSource = source; // stored so stopRecording can disconnect it
-    workletNode = new AudioWorkletNode(captureCtx, 'pcm-capture-processor', {
-      processorOptions: { chunkSamples: 640  }
-      // 4096 samples at 16kHz = 256ms per chunk — good balance of
-      // latency vs WebSocket message overhead.
+    document.getElementById('vol').addEventListener('input', function () {
+      if (gainNode) gainNode.gain.setTargetAtTime(parseFloat(this.value), playCtx.currentTime, 0.015);
     });
 
-    // When the worklet has accumulated a chunk, send it over WebSocket
-    workletNode.port.onmessage = (e) => {
-      if (e.data.type === 'chunk' && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(e.data.buffer); // Send ArrayBuffer as binary WebSocket frame
-        sentChunks++;
-        document.getElementById('dbg-sent').textContent = sentChunks;
-      }
-    };
-
-    // Connect source → worklet (but NOT worklet → destination — no feedback)
-    source.connect(workletNode);
-
-    isRecording = true;
-    document.getElementById('mic-btn').classList.add('recording');
-    document.getElementById('mic-btn').title = 'Recording — click to stop';
-    document.getElementById('mic-ind').classList.add('active');
-
-    // Resume playback context too (in case it was suspended)
-    if (playCtx && playCtx.state === 'suspended') playCtx.resume();
-  }
-
-  /**
-   * Stop microphone capture.
-   * Called when the user releases the mic button.
-   */
-  function stopRecording() {
-    if (!isRecording) return;
-
-    // Disconnect and clean up the worklet
-    if (workletNode) {
-      workletNode.port.onmessage = null;
-      workletNode.disconnect();
-      workletNode = null;
+    async function playChunk(buf) {
+      if (!playCtx) return;
+      if (playCtx.state === 'suspended') await playCtx.resume();
+      const pcm = new Int16Array(buf);
+      const f32 = new Float32Array(pcm.length);
+      for (let i = 0; i < pcm.length; i++) f32[i] = pcm[i] / 32768.0;
+      const ab = playCtx.createBuffer(1, f32.length, playCtx.sampleRate);
+      ab.getChannelData(0).set(f32);
+      const src = playCtx.createBufferSource();
+      src.buffer = ab; src.connect(gainNode);
+      const now = playCtx.currentTime;
+      const at = Math.max(now, nextStartAt);
+      src.start(at);
+      nextStartAt = at + ab.duration;
+      document.getElementById('audio-bars').classList.add('active');
+      src.onended = () => { if (playCtx.currentTime >= nextStartAt - 0.05) document.getElementById('audio-bars').classList.remove('active'); };
     }
 
-    // Disconnect the source node too (was leaking as orphan on each press)
-    if (micSource) {
-      micSource.disconnect();
-      micSource = null;
+    async function initCapture(sampleRate) {
+      if (captureCtx && captureCtx.sampleRate === sampleRate) return;
+      const workletCode = document.getElementById('worklet-src').textContent;
+      const blob = new Blob([workletCode], { type: 'application/javascript' });
+      const blobUrl = URL.createObjectURL(blob);
+      if (captureCtx) await captureCtx.close();
+      captureCtx = new AudioContext({ sampleRate: sampleRate, latencyHint: 'interactive' });
+      await captureCtx.audioWorklet.addModule(blobUrl);
+      URL.revokeObjectURL(blobUrl);
+      document.getElementById('mic-btn').disabled = false;
+      document.getElementById('mic-hint').textContent = 'Click to speak';
     }
 
-    // Stop all mic tracks (releases the browser's mic indicator — the red dot)
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
+    async function startRecording() {
+      if (isRecording || !ws || !captureCtx || geminiSpeaking) return;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: captureCtx.sampleRate, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      } catch (err) { addMsg('err', `Microphone error: ${err.message}`); return; }
+
+      if (captureCtx.state === 'suspended') await captureCtx.resume();
+      micSource = captureCtx.createMediaStreamSource(micStream);
+      workletNode = new AudioWorkletNode(captureCtx, 'pcm-capture-processor', { processorOptions: { chunkSamples: 640 } });
+
+      workletNode.port.onmessage = (e) => {
+        if (e.data.type === 'chunk' && ws && ws.readyState === WebSocket.OPEN) ws.send(e.data.buffer);
+      };
+
+      micSource.connect(workletNode);
+      isRecording = true;
+      document.getElementById('mic-btn').classList.add('recording');
+      document.getElementById('mic-ind').classList.add('active');
+      if (playCtx && playCtx.state === 'suspended') playCtx.resume();
     }
 
-    // if (ws && ws.readyState === WebSocket.OPEN) {
-    //   ws.send(JSON.stringify({ type: 'audio_end' }));
-    // }
-    isRecording = false;
-    document.getElementById('mic-btn').classList.remove('recording');
-    document.getElementById('mic-btn').title = 'Click to speak (or press Space)';
-    document.getElementById('mic-ind').classList.remove('active');
-  }
+    function stopRecording() {
+      if (!isRecording) return;
+      if (workletNode) { workletNode.port.onmessage = null; workletNode.disconnect(); workletNode = null; }
+      if (micSource) { micSource.disconnect(); micSource = null; }
+      if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+      isRecording = false;
+      document.getElementById('mic-btn').classList.remove('recording');
+      document.getElementById('mic-ind').classList.remove('active');
+    }
 
-  // ============================================================
-  // WEBSOCKET
-  // ============================================================
+    // ============================================================
+    // 3. WEBSOCKET LOGIC 
+    // ============================================================
+    function connect() {
+      setConn('connecting', 'Connecting...');
+      ws = new WebSocket(`ws://localhost:8000/ws/voice?session_id=${sessionId}`);
 
-  function connect() {
-    setConn('connecting', 'Connecting...');
-    ws = new WebSocket(`ws://localhost:8000/ws/voice?session_id=${sessionId}`);
+      ws.onopen = () => {
+        setConn('connected', 'Connected');
+        addMsg('sys', 'Connected. Opening AI session...');
+      };
 
-    ws.onopen = () => {
-      setConn('connected', 'Connected');
-      addMsg('sys', 'Connected. Opening AI session...');
-    };
+      ws.onmessage = async (e) => {
+        if (e.data instanceof Blob) { await playChunk(await e.data.arrayBuffer()); }
+        else if (e.data instanceof ArrayBuffer) { await playChunk(e.data); }
+        else { handleMsg(e.data); }
+      };
 
-    ws.onmessage = async (e) => {
-      if (e.data instanceof Blob) {
-        await playChunk(await e.data.arrayBuffer());
-      } else if (e.data instanceof ArrayBuffer) {
-        await playChunk(e.data);
-      } else {
-        handleMsg(e.data);
-      }
-    };
+      ws.onclose = () => {
+        setConn('disconnected', `Disconnected. Reconnecting...`);
+        stopRecording(); nextStartAt = 0; document.getElementById('audio-bars').classList.remove('active');
+        setTimeout(connect, 3000);
+      };
+    }
 
-    ws.onclose = (ev) => {
-      setConn('disconnected', `Disconnected (${ev.code}). Reconnecting...`);
-      stopRecording();
-      nextStartAt = 0;
-      document.getElementById('audio-bars').classList.remove('active');
-      setTimeout(connect, 3000);
-    };
+    function handleMsg(raw) {
+      let m; try { m = JSON.parse(raw); } catch { addMsg('ai', raw); return; }
 
-    ws.onerror = () => addMsg('err', 'WebSocket error — is the server running?');
-  }
-
-  function handleMsg(raw) {
-    let m;
-    try { m = JSON.parse(raw); } catch { addMsg('ai', raw); return; }
-
-    switch (m.type) {
-      case 'audio_config':
-        // Output playback config — create 24kHz AudioContext for playing Gemini's voice
-        initPlayback(m.sample_rate);
-        break;
-
-      case 'mic_config':
-        // Input capture config — create 16kHz AudioContext + AudioWorklet for mic
-        initCapture(m.sample_rate).catch(err =>
-          addMsg('err', `Mic setup error: ${err.message}`)
-        );
-        break;
-
-      case 'text':
-        appendToAi(m.text);
-        break;
-
-      case 'transcript':
-        // Server sends m.role ("user" or "ai"), not m.speaker
-        if (m.role === 'user') {
-          // Accumulate word-fragments into ONE bubble per user speech turn.
-          // Gemini streams the transcript word-by-word; each fragment must
-          // append to the same element, not create a new row.
-          if (!currentUserTranscriptEl) {
-            currentUserTranscriptEl = document.createElement('div');
-            currentUserTranscriptEl.className = 'msg transcript-user';
-            const body = document.createElement('div');
-            body.className = 'msg-body';
-            body.textContent = 'You: "' + m.text.trim();
-            currentUserTranscriptEl.appendChild(body);
-            document.getElementById('chat').appendChild(currentUserTranscriptEl);
-            scrollBottom();
+      switch (m.type) {
+        case 'audio_config': initPlayback(m.sample_rate); break;
+        case 'mic_config': initCapture(m.sample_rate).catch(err => addMsg('err', `Mic error: ${err.message}`)); break;
+        case 'text': appendToAi(m.text); break;
+        case 'transcript':
+          if (m.role === 'user') {
+            if (!currentUserTranscriptEl) {
+              currentUserTranscriptEl = document.createElement('div');
+              currentUserTranscriptEl.className = 'msg transcript-user';
+              currentUserTranscriptEl.innerHTML = '<div class="msg-body">You: "' + m.text.trim() + '</div>';
+              document.getElementById('chat').appendChild(currentUserTranscriptEl);
+              scrollBottom();
+            } else {
+              currentUserTranscriptEl.querySelector('.msg-body').textContent += m.text;
+              scrollBottom();
+            }
           } else {
-            currentUserTranscriptEl.querySelector('.msg-body').textContent += m.text;
-            scrollBottom();
+            appendToAi(m.text);
           }
-        } else {
-          // AI output transcript — stream into the current assistant bubble
-          appendToAi(m.text);
-      //   }
-      //   break;
-      
-      // case 'interrupted':
-      // nextStartAt = 0;
-      // document.getElementById('audio-bars').classList.remove('active');
-      // if (currentAiEl) {
-      //   currentAiEl.classList.remove('streaming');
+          break;
+        case 'status': handleStatus(m.status, m.message); break;
+        case 'error': addMsg('err', `Error: ${m.message}`); setInputEnabled(true); break;
+
+        // UI Commands
+        case 'action':
+        case 'browser_action':
+          handleUiAction(m);
+          break;
       }
-      break;
+    }
 
-      case 'status':
-        handleStatus(m.status, m.message);
-        break;
-
-      case 'error':
-        addMsg('err', `Error: ${m.message}`);
+    function handleStatus(s, msg) {
+      if (s === 'thinking') {
+        geminiSpeaking = true;
+        if (isRecording) stopRecording();
+        if (msg) addMsg('sys', `⟳ ${msg}`);
+      } else if (s === 'done' || s === 'ready') {
+        geminiSpeaking = false;
+        if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
+        if (currentUserTranscriptEl) { currentUserTranscriptEl = null; }
+        nextStartAt = 0;
         setInputEnabled(true);
-        break;
-
-      case 'action':
-        console.debug('Action:', m);
-        addMsg('sys', `[Action: ${m.action || JSON.stringify(m)}]`);
-        break;
-    }
-  }
-
-  function handleStatus(s, msg) {
-    if (s === 'thinking') {
-      // Gemini is now generating — stop mic immediately to prevent 1008 error.
-      // The model cannot accept send_realtime_input() while responding.
-      geminiSpeaking = true;
-      if (isRecording) stopRecording();
-      // Update mic button to show it's locked while assistant speaks
-      const btn = document.getElementById('mic-btn');
-      btn.title = 'Wait for assistant to finish...';
-      if (msg) addMsg('sys', `⟳ ${msg}`);
-    } else if (s === 'done' || s === 'ready') {
-      // Gemini finished — mic is allowed again
-      geminiSpeaking = false;
-      if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
-      // Close and seal the user transcript bubble for this turn
-      if (currentUserTranscriptEl) {
-        const body = currentUserTranscriptEl.querySelector('.msg-body');
-        if (!body.textContent.endsWith('"')) body.textContent += '"';
-        currentUserTranscriptEl = null;
+        if (msg && s === 'ready') addMsg('sys', `✓ ${msg}`);
+      } else if (s === 'error') {
+        geminiSpeaking = false; setInputEnabled(true);
+        if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
       }
-      nextStartAt = 0;
-      setInputEnabled(true);
-      document.getElementById('mic-btn').title = 'Click to speak (or press Space)';
-      if (s === 'done') document.getElementById('dbg-turns').textContent = ++turnCount;
-      if (msg && s === 'ready') addMsg('sys', `✓ ${msg}`);
-    } else if (s === 'error') {
-      geminiSpeaking = false;
-      setInputEnabled(true);
-      if (currentAiEl) { currentAiEl.classList.remove('streaming'); currentAiEl = null; }
-      if (currentUserTranscriptEl) { currentUserTranscriptEl = null; }
-      document.getElementById('mic-btn').title = 'Click to speak (or press Space)';
     }
-  }
 
-  // ============================================================
-  // TEXT INPUT (secondary — alongside mic)
-  // ============================================================
-
-  function sendText() {
-    const inp = document.getElementById('text-input');
-    const text = inp.value.trim();
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    addMsg('user', text);
-    inp.value = '';
-    currentAiEl = null;
-    setInputEnabled(false);
-    if (playCtx && playCtx.state === 'suspended') playCtx.resume();
-    ws.send(JSON.stringify({ type: 'text', text }));
-  }
-
-  // ============================================================
-  // MIC BUTTON — mouse, touch, and keyboard
-  // ============================================================
-
-  // ============================================================
-  // MIC BUTTON — click once to START, click again to STOP
-  // Hold-to-talk is removed: it caused the 1008 error because audio
-  // kept streaming after Gemini started responding. Toggle mode lets
-  // the user speak a full sentence then stop, and Gemini responds
-  // only after mic is stopped.
-  // ============================================================
-
-  const micBtn = document.getElementById('mic-btn');
-
-  micBtn.addEventListener('click', e => {
-    e.preventDefault();
-    if (isRecording) stopRecording(); else startRecording();
-  });
-
-  // Space bar: tap to toggle (same as button click)
-  document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && !e.repeat && document.activeElement !== document.getElementById('text-input')) {
-      e.preventDefault();
-      if (isRecording) stopRecording(); else startRecording();
+    function sendText() {
+      const inp = document.getElementById('text-input');
+      const text = inp.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      addMsg('user', text);
+      inp.value = '';
+      currentAiEl = null; setInputEnabled(false);
+      if (playCtx && playCtx.state === 'suspended') playCtx.resume();
+      ws.send(JSON.stringify({ type: 'text', text }));
     }
-  });
 
-  // Text input events
-  document.getElementById('text-input').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !this.disabled) { e.preventDefault(); sendText(); }
-  });
-  document.getElementById('send-btn').addEventListener('click', sendText);
+    // Events
+    document.getElementById('mic-btn').addEventListener('click', e => { e.preventDefault(); if (isRecording) stopRecording(); else startRecording(); });
+    document.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && document.activeElement !== document.getElementById('text-input')) { e.preventDefault(); if (isRecording) stopRecording(); else startRecording(); } });
+    document.getElementById('text-input').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !this.disabled) { e.preventDefault(); sendText(); } });
+    document.getElementById('send-btn').addEventListener('click', sendText);
 
-  // ============================================================
-  // UI HELPERS
-  // ============================================================
-
-  function appendToAi(text) {
-    if (!currentAiEl) {
-      currentAiEl = document.createElement('div');
-      currentAiEl.className = 'msg ai streaming';
-      const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = 'Assistant';
-      const body = document.createElement('div'); body.className = 'msg-body';
-      currentAiEl.appendChild(lbl); currentAiEl.appendChild(body);
-      document.getElementById('chat').appendChild(currentAiEl);
+    // UI Helpers
+    function appendToAi(text) {
+      if (!currentAiEl) {
+        currentAiEl = document.createElement('div');
+        currentAiEl.className = 'msg ai streaming';
+        currentAiEl.innerHTML = '<div class="msg-label">Assistant</div><div class="msg-body"></div>';
+        document.getElementById('chat').appendChild(currentAiEl);
+      }
+      currentAiEl.querySelector('.msg-body').textContent += text;
+      scrollBottom();
     }
-    currentAiEl.querySelector('.msg-body').textContent += text;
-    scrollBottom();
-  }
-
-  function addMsg(type, text) {
-    const chat = document.getElementById('chat');
-    const el = document.createElement('div');
-    el.className = 'msg ' + type;
-    if (type === 'user') {
-      const lbl = document.createElement('div'); lbl.className = 'msg-label'; lbl.textContent = 'You'; el.appendChild(lbl);
+    function addMsg(type, text) {
+      const chat = document.getElementById('chat');
+      const el = document.createElement('div'); el.className = 'msg ' + type;
+      if (type === 'user') el.innerHTML = '<div class="msg-label">You</div>';
+      el.innerHTML += `<div class="msg-body">${text}</div>`;
+      chat.appendChild(el); scrollBottom();
     }
-    const body = document.createElement('div'); body.className = 'msg-body'; body.textContent = text; el.appendChild(body);
-    chat.appendChild(el);
-    scrollBottom();
-  }
+    function scrollBottom() { const c = document.getElementById('chat'); c.scrollTop = c.scrollHeight; }
+    function setInputEnabled(on) { document.getElementById('text-input').disabled = !on; document.getElementById('send-btn').disabled = !on; }
+    function setConn(state, text) { document.getElementById('conn-dot').className = 'dot ' + state; document.getElementById('conn-text').textContent = text; }
 
-  function scrollBottom() { const c = document.getElementById('chat'); c.scrollTop = c.scrollHeight; }
+    // ============================================================
+    // 4. PHASE 8 UI ACTION EXECUTORS
+    // ============================================================
+    function handleUiAction(msg) {
+      const cmd = (typeof msg.action === 'object') ? msg.action : msg;
 
-  function setInputEnabled(on) {
-    document.getElementById('text-input').disabled = !on;
-    document.getElementById('send-btn').disabled = !on;
-    // Never disable the mic button — barge-in must always work
-  }
+      logAction(cmd.action, JSON.stringify(cmd, (k, v) => k === "type" || k === "action" ? undefined : v));
 
-  function setConn(state, text) {
-    document.getElementById('conn-dot').className = 'dot ' + state;
-    document.getElementById('conn-text').textContent = text;
-  }
+      switch (cmd.action) {
+        case "highlight_product":
+          doHighlightProduct(cmd.product_id, cmd.scroll !== false);
+          break;
+        case "update_cart_badge":
+          doUpdateCartBadge(cmd.count);
+          break;
+        case "show_notification":
+          showToast(cmd.message, cmd.level || "info", 3000);
+          break;
+        case "open_cart":
+          openCartDrawer();
+          break;
+        case "close_cart":
+          closeCartDrawer();
+          break;
+        case "show_product_modal":
+          doShowProductModal(cmd.product_id, cmd.product_name);
+          break;
+        case "set_search_query":
+          const input = document.getElementById("text-input");
+          input.value = cmd.query;
+          input.focus();
+          break;
+        case "clear_highlights":
+          document.querySelectorAll(".vc-highlighted").forEach(el => el.classList.remove("vc-highlighted"));
+          break;
+      }
+    }
 
-  // ============================================================
-  // START
-  // ============================================================
-  connect();
+    function doHighlightProduct(productId, scroll) {
+      const el = document.querySelector(`[data-product-id="${productId}"]`);
+      if (!el) return;
+      if (scroll) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("vc-highlighted");
+      setTimeout(() => el.classList.remove("vc-highlighted"), 3500);
+    }
+
+    function doUpdateCartBadge(count) {
+      const badge = document.getElementById("cartBadge");
+      badge.textContent = count;
+      if (count > 0) {
+        badge.classList.add("visible");
+        badge.style.transform = "scale(1.4)";
+        setTimeout(() => badge.style.transform = "", 200);
+      } else {
+        badge.classList.remove("visible");
+      }
+    }
+
+    function showToast(message, level, duration) {
+      const container = document.getElementById("toastContainer");
+      const toast = document.createElement("div");
+      toast.className = "toast " + level;
+      toast.textContent = message;
+      container.appendChild(toast);
+      requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.add("show")));
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => container.removeChild(toast), 300);
+      }, duration);
+    }
+
+    function openCartDrawer() { document.getElementById("cartDrawer").classList.add("open"); }
+    function closeCartDrawer() { document.getElementById("cartDrawer").classList.remove("open"); }
+    function toggleCartDrawer() { document.getElementById("cartDrawer").classList.toggle("open"); }
+
+    function doShowProductModal(productId, productName) {
+      document.getElementById("modalTitle").textContent = productName;
+      document.getElementById("modalBody").textContent = `Product ID: ${productId} — Just tell the assistant if you want to add it to your cart!`;
+      document.getElementById("productModal").classList.add("open");
+    }
+    function closeModal() { document.getElementById("productModal").classList.remove("open"); }
+
+    function logAction(actionName, details) {
+      const log = document.getElementById("actionsLog");
+      const el = document.createElement("div");
+      el.className = "act-entry";
+      const now = new Date().toLocaleTimeString();
+      el.innerHTML = `<span class="act-time">${now}</span><span><b>${actionName}</b> ${details}</span>`;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // Start
+    connect();
   </script>
-  </body>
-  </html>
+</body>
+
+</html>

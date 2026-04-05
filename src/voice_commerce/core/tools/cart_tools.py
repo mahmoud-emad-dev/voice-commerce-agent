@@ -16,6 +16,7 @@ import structlog
 
 # 1. Import our Live Client and our Pydantic Models!
 from voice_commerce.services.woocommerce_client import get_client
+from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.models.cart import Cart, CartItem
 
 log = structlog.get_logger(__name__)
@@ -34,7 +35,7 @@ def _get_cart(session_id: str) -> Cart:
 
 # Tools methods
 
-async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "default") -> str:
+async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "default") -> ToolResponse:
     """
     Add a product to the customer's cart, validated against live WooCommerce data.
     """
@@ -42,7 +43,7 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
     log.info("add_to_cart_live", product_id=product_id, quantity=quantity, session=session_id)
 
     if quantity < 1:
-        return "Please specify a quantity of 1 or more."
+        return ToolResponse.error("Please specify a quantity of 1 or more.")
     
     try:
         # 1. Validate against LIVE WooCommerce
@@ -50,13 +51,13 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
         product = await client.get_product(product_id)
         # Handle 404 (AI hallucinated the ID or it was deleted)
         if product is None:
-            return (
+            return ToolResponse.error(
                 f"I couldn't find product ID {product_id}. "
                 "Try searching again — it may no longer be available."
             )
         # Handle Out of Stock
         if not product.is_in_stock:
-            return f"Sorry, '{product.name}' is currently out of stock."
+            return ToolResponse.error(f"Sorry, '{product.name}' is currently out of stock.")
 
         # # Handle Variations (Simple)
         # if product.has_variations:
@@ -84,39 +85,48 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
 
         # 3. Format the response
         item = cart.items[product_id]
-        return (
+        ai_text=  (
             f"{action} {item.quantity}× {item.name} "
             f"(${item.price:.2f} each) to your cart.\n"
             f"Cart total: ${cart.total:.2f} "
             f"({cart.item_count} item{'s' if cart.item_count != 1 else ''})"
         )
+        # 4. Return the explicit data the Action Dispatcher needs for the UI
+        return ToolResponse.success(
+            ai_text=ai_text ,
+            data={
+                "product_id": product_id,       # Tells UI which item to highlight
+                "product_name": item.name,      # Tells UI what to put in the green toast
+                "cart_count": cart.item_count   # Tells UI what number to put on the cart badge
+                }
+            )
     
     except RuntimeError:
-        return "My connection to the store's database is currently offline."
+        return ToolResponse.error("My connection to the store's database is currently offline.")
     except Exception as e:
         log.error("tool_add_to_cart_error", error=str(e))
-        return "I'm having trouble adding that to the cart right now. Please try again."
+        return ToolResponse.error("I'm having trouble adding that to the cart right now. Please try again.")
 
 
 
     
 
-async def show_cart(session_id: str = "default") -> str:
+async def show_cart(session_id: str = "default") -> ToolResponse:
     """Show the customer's current cart contents and total."""
     log.info("show_cart", session=session_id)
     cart = _get_cart(session_id)
+    response = cart.to_tool_response()
+    return ToolResponse.success(ai_text=response["ai_text"] , data=response["data"])
 
-    return cart.to_tool_response()
 
-
-async def remove_from_cart(product_id: int,session_id: str = "default") -> str:
+async def remove_from_cart(product_id: int,session_id: str = "default") -> ToolResponse:
     """Remove a product from the cart by its ID."""
     log.info("remove_from_cart", product_id=product_id, session=session_id)
  
     cart = _get_cart(session_id)
     if product_id not in cart.items:
-        return (
-            f"Product ID {product_id} isn't in your cart. "
+        return ToolResponse.error(
+            error_msg=f"Product ID {product_id} isn't in your cart. "
             "Say 'show my cart' to see what's in it."
         )
  
@@ -124,9 +134,18 @@ async def remove_from_cart(product_id: int,session_id: str = "default") -> str:
     del cart.items[product_id]
  
     if cart.is_empty():
-        return f"Removed {name}. Your cart is now empty."
- 
-    return f"Removed {name} from your cart. New total: ${cart.total:.2f}"
+        return ToolResponse.success(f"Removed {name}. Your cart is now empty.")
+    
+    # We must pass cart_count so the UI badge updates correctly!
+    ai_text = f"Removed {name} from your cart. New total: ${cart.total:.2f}"
+    return ToolResponse.success(
+        ai_text=ai_text ,
+        data={
+            "product_id": product_id, 
+            "product_name": name,     
+            "cart_count": cart.item_count   
+            }
+        )
 
     
 

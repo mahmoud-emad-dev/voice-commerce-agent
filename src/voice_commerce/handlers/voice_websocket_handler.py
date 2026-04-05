@@ -20,6 +20,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler 
 from voice_commerce.core.voice  import audio_processor 
 from voice_commerce.core.tools import tool_dispatcher
+from voice_commerce.core.actions.action_dispatcher import ActionDispatcher
 
 log = structlog.get_logger(__name__)
 
@@ -66,7 +67,7 @@ class VoiceWebSocketHandler:
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
-
+        self.action_dispatcher = ActionDispatcher()
         log.info("voice_handler_created", session_id=self.session_id)
 
 
@@ -263,12 +264,30 @@ class VoiceWebSocketHandler:
                 call_id    = event.get("call_id")
                 # log.info("tool_call_received",  tool=tool_name, session=self.session_id ,call_id = call_id, args =tool_args )
 
-                # Execute the tool and get the result string AS Execute the python tool using our dispatcher
+                # 1. Execute the tool and get the result string AS Execute the python tool using our dispatcher (Returns our strict ToolResponse object!)
                 context = tool_dispatcher.ToolContext(session_id=self.session_id)
-                result = await tool_dispatcher.execute(tool_name, tool_args, context)
-                log.info("tool_call_result", tool=tool_name,preview=result[:80], session=self.session_id)
+                tool_response = await tool_dispatcher.execute(tool_name, tool_args, context)
+                log.info("tool_call_result", tool=tool_name,preview=tool_response.ai_text[:100], session=self.session_id)
+                
+                # 2. TRAFFIC TO BROWSER UI
+                # Send the object to the Action Dispatcher to calculate visual commands
+                actions = self.action_dispatcher.dispatch(tool_name=tool_name, tool_args=tool_args, tool_response=tool_response)
+
+                # Send each visual command down the websocket to the user's browser
+                for action in actions:
+                    await self._send_json(action.model_dump())
+
+                # 3. TRAFFIC TO GEMINI AI
                 # Send the result back to Gemini, referencing the call_id so Gemini knows which call this result belongs to
-                await gemini.send_tool_result(call_id, tool_name, result)
+                # # We format the payload as a dictionary for Gemini
+                # if tool_response.status == "error":
+                #     gemini_payload = {"error": tool_response.ai_text}
+                # else:
+                #     gemini_payload = {"result": tool_response.ai_text}
+                #  temporary we will just send str not dict to gemini as im buildig the send_tool_result to take str nad send str not dict 
+                await gemini.send_tool_result(call_id, tool_name, tool_response.ai_text)
+
+
 
             # # ── 6. INTERRUPT ─────────────────────────────────────────────────
             # elif event_type == "interrupted":

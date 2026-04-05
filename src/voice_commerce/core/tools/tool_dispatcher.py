@@ -6,6 +6,7 @@ import structlog
 from google.genai import types
 
 from voice_commerce.core.tools import tool_registry , cart_tools, product_tools
+from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
 
@@ -36,7 +37,7 @@ _TOOLS: dict[str, Any] = {
 
 
 
-async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> str:
+async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContext) -> ToolResponse:
     """
     Execute a named tool, inject session context, return result string.
  
@@ -56,7 +57,7 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
 
     if not tool_registry.is_registered(tool_name):
         log.warning("dispatcher_unknown_tool", name=tool_name)
-        return (
+        return ToolResponse.error(
             f"I don't have a '{tool_name}' function. "
             f"Available tools: {', '.join(_TOOLS)}"
         )
@@ -70,17 +71,17 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         session=context.session_id,
     )
     try:
-        result = await _TOOLS[tool_name](**merged_args)
-        log.info("dispatcher_done", tool=tool_name, result_len=len(result))
+        result: ToolResponse = await _TOOLS[tool_name](**merged_args)
+        log.info("dispatcher_done", tool=tool_name, result=result.ai_text)
         return result
     
     except TypeError as exc:
         log.warning("dispatcher_arg_mismatch", tool=tool_name, error=str(exc))
-        return f"I had trouble calling {tool_name}. Please try rephrasing."
+        return ToolResponse.error(f"I had trouble calling {tool_name}. Please try rephrasing.")
 
     except Exception as exc:
         log.error("dispatcher_error", tool=tool_name, error=str(exc), exc_info=True)
-        return "Something went wrong. Please try again."
+        return ToolResponse.error("Something went wrong. Please try again.")
 
 
 

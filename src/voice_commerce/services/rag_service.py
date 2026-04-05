@@ -139,7 +139,7 @@ class RagService:
         query: str,
         limit: int = 5,
         max_price: float | None = None,
-    ) -> list[str]:
+    ) -> list[Product]:
         """
         Semantic product search. Runs on every user voice command.
         Embed query and find most similar products using Qdrant.

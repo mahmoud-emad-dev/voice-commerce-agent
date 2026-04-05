@@ -55,7 +55,7 @@ class Retriever:
         query: str,
         limit: int = 5,
         max_price: float | None = None,
-        ) -> list[str]:
+        ) -> list[Product]:
         """
         Embed the query and search Qdrant for the most similar products.
 
@@ -86,15 +86,10 @@ class Retriever:
         except Exception as e:
             log.exception("retriever_search_failed", query=query[:80], error=str(e))
             return []
-
-
-        # 3. Normalise payloads → clean product dicts
-        # Pydantic handles it 100% flawlessly via your existing .to_tool_summary() method!
-        normalised_products = [product.to_tool_summary() for product in retrieved_products]
         
         log.info(
             "retriever_results",
             query=query[:60],
-            count=len(normalised_products),
+            count=len(retrieved_products),
         )
-        return normalised_products
+        return retrieved_products
