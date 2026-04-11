@@ -28,7 +28,8 @@ from fastapi.staticfiles import StaticFiles
 
 
 from voice_commerce.config.settings import settings
-from voice_commerce.api.routes import health , voice
+from voice_commerce.api.routes import health , voice ,widget
+from voice_commerce.api.middleware.cors import add_cors_middleware
 from voice_commerce.services import woocommerce_client
 from voice_commerce.services.rag_service import get_rag_service
 
@@ -141,14 +142,7 @@ def create_app() -> FastAPI:
     )
 
     # CORS Middleware: Allows the frontend browser to talk to this backend
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # Adjust this in production # Phase 14: Restrict this to real domain name
-        allow_credentials=True, 
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
+    add_cors_middleware(app)
     # Root route - provides a friendly entry point
     @app.get("/" , tags=["system"])
     async def root():
@@ -166,11 +160,12 @@ def create_app() -> FastAPI:
     # Register other routes 
     app.include_router(health.router ,tags=["system"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
+    app.include_router(widget.router, prefix="/static", tags=["widget"])
 
-    # Mount the frontend UI folder so localhost:8000/static/test_client.html works
-    static_dir = "static"
-    if os.path.exists(static_dir):
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    # # Mount the frontend UI folder so localhost:8000/static/test_client.html works
+    # static_dir = "static"
+    # if os.path.exists(static_dir):
+    #     app.mount("/static", StaticFiles(directory=static_dir), name="static")
  
 
     return app

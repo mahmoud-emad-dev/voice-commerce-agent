@@ -43,6 +43,9 @@ STATUS_DONE       = "done"
 STATUS_READY      = "ready"
 STATUS_ERROR      = "error"
 
+# GLOBAL MEMORY STORE: Keeps transcripts alive across page reloads!
+# In a real production app, this would be a database like Redis or Postgres.
+GLOBAL_SESSIONS: dict[str, list[dict[str, str]]] = {}
 
 class VoiceWebSocketHandler:
     """
@@ -62,8 +65,10 @@ class VoiceWebSocketHandler:
     def __init__(self, session_id: str | None = None) -> None:
 
         self.session_id = session_id or f"sess_{int(time.time() * 1000)}"
-
-        self._transcript: list[dict[str, str]] = []
+        # Fetch old memory from the global store, or start a new list if it's a new session
+        if self.session_id not in GLOBAL_SESSIONS:
+            GLOBAL_SESSIONS[self.session_id] = []
+        self._transcript: list[dict[str, str]] = GLOBAL_SESSIONS[self.session_id]
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
@@ -94,7 +99,7 @@ class VoiceWebSocketHandler:
 
         try:
             # 2 ====== Open the Gemini Live session ======
-            async with GeminiLiveHandler() as gemini:
+            async with GeminiLiveHandler(transcript=self._transcript) as gemini:
                 self._gemini = gemini
                 await self._send_status(STATUS_READY, "Ready — speak or type")
 
@@ -178,6 +183,21 @@ class VoiceWebSocketHandler:
                 #     await gemini.send_audio_stream_end()
                 #     await self._send_status(STATUS_THINKING, "Processing speech...")
                 #     continue
+                
+                # ── 2.1 HANDLE CONTEXT UPDATES (Hidden from Chat) ─────────────
+                try:
+                    parsed = json.loads(raw_text)
+                    if isinstance(parsed, dict) and parsed.get("type") == "context_update":
+                        log.info("context_update_received", session_id=self.session_id , filters=parsed.get("page", {}).get("active_filters", []) , items=len(parsed.get("products", [])))
+                        log.info("context_update_received", parsed=parsed)
+                        log.info("context_update_received", page=parsed.get("page", {}), products=parsed.get("products", []))
+                        await gemini.inject_live_context(
+                            page=parsed.get("page", {}),
+                            products=parsed.get("products", [])
+                        )
+                        continue  # Skip the rest of the loop so it doesn't show in chat!
+                except json.JSONDecodeError:
+                    pass
 
                 user_text = self._parse_text_message(raw_text)
 
@@ -252,6 +272,9 @@ class VoiceWebSocketHandler:
 
             # ── 4. TEXT CHUNK (rare in audio mode) ───────────────────────────
             elif event_type == MSG_TEXT:
+                # THE FIX: Intercept the silent acknowledgment so it doesn't show in the chat UI!
+                if "[SILENT_UPDATE]" in event["text"]:
+                    continue
                 await self._send_json({
                     "type": MSG_TEXT,
                     "text": event["text"],

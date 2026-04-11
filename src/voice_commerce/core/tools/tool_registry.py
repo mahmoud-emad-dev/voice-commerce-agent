@@ -43,7 +43,7 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                         type=types.Type.STRING,
                         description=(
                             "Optional product category to filter by, e.g. 'shoes', "
-                            "'electronics', 'clothing'. Only include if clearly mentioned."
+                            "'electronics', 'clothing' , any more. Only include if clearly mentioned."
                         ),
                     ),
                 },
