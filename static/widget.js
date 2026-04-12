@@ -1066,6 +1066,13 @@
         };
 
         STATE.ws.onclose = function (evt) {
+
+            if (evt.code === 1000 && evt.reason === "Gemini session refresh") {
+                console.log('[VoiceCommerce] Refreshing session to bypass Gemini limits...');
+                _setStatus('connecting');
+                setTimeout(_wsConnect, 500); // 500ms instant reconnect
+                return; // Stop execution here so we don't trigger the disconnect logic below!
+            }
             _setStatus('disconnected');
             _stopMic();
 

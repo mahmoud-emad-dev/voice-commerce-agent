@@ -46,7 +46,7 @@ STATUS_ERROR      = "error"
 # GLOBAL MEMORY STORE: Keeps transcripts alive across page reloads!
 # In a real production app, this would be a database like Redis or Postgres.
 GLOBAL_SESSIONS: dict[str, list[dict[str, str]]] = {}
-
+GLOBAL_HANDLES: dict[str, str] = {}  # Stores Google's resumption handles
 class VoiceWebSocketHandler:
     """
     Manages one WebSocket session from one browser client.
@@ -69,6 +69,7 @@ class VoiceWebSocketHandler:
         if self.session_id not in GLOBAL_SESSIONS:
             GLOBAL_SESSIONS[self.session_id] = []
         self._transcript: list[dict[str, str]] = GLOBAL_SESSIONS[self.session_id]
+        self._resumption_handle: str | None = GLOBAL_HANDLES.get(self.session_id)
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
@@ -99,10 +100,27 @@ class VoiceWebSocketHandler:
 
         try:
             # 2 ====== Open the Gemini Live session ======
-            async with GeminiLiveHandler(transcript=self._transcript) as gemini:
+            async with GeminiLiveHandler(transcript=self._transcript , resumption_handle=self._resumption_handle) as gemini:
                 self._gemini = gemini
                 await self._send_status(STATUS_READY, "Ready — speak or type")
 
+                # ── 2.1 Proactive Greeting (Only on first connection) ──────────
+                if not self._resumption_handle and len(self._transcript) == 0:
+                    async def delayed_greeting():
+                        await asyncio.sleep(1.5) 
+                        log.info("triggering_proactive_greeting", session_id=self.session_id)
+                        await gemini.send_text("--- SYSTEM: The user just connected to the store. Greet them warmly in one short sentence and ask what they are looking for today. ---")
+                    asyncio.create_task(delayed_greeting())
+
+                # # ── 2.2 Session Rotation (Auto-disconnect after 9 minutes of silence) ──────────
+                # async def _session_timer():
+                #     await asyncio.sleep(540) # 9 minutes
+                #     log.info("session_9_minute_rotation_triggered", session_id=self.session_id)
+                #     # Tell the widget to reconnect instantly. Because we saved the handle,
+                #     # it will wake up with perfect memory!
+                #     await websocket.close(code=1000, reason="Gemini session refresh")
+                
+                # timer_task = asyncio.create_task(_session_timer())
                 # 3 ====== Run the two communication tasks concurrently until one raises an exception (e.g. disconnect) ======
                 # gather() runs both loops simultaneously.
                 # return_exceptions=False means if one loop crashes, the other is cancelled cleanly.
@@ -323,8 +341,16 @@ class VoiceWebSocketHandler:
             #     log.info("gemini_interrupted", session_id=self.session_id)
             #     await self._send_json({"type": "interrupted"})
 
+            # ── 7. RESUMPTION HANDLE ──────────────────────────────────────────
+            elif event_type == "resumption_handle":
+                handle = event.get("handle")
+                if handle is not None:
+                    GLOBAL_HANDLES[self.session_id] = handle
+                    log.info("resumption_handle_received", handle=handle, session_id=self.session_id)
+                    # Optionally send to frontend so it can be saved
+                    # await self._send_json({"type": "resumption_handle", "handle": handle})
 
-            # ── 7. TURN COMPLETE (The AI finished its thought or One complete turn) ────────────
+            # ── 8. TURN COMPLETE (The AI finished its thought or One complete turn) ────────────
             elif event_type == "turn_complete":
                 # One AI response turn finished.
                 # In voice mode: DON'T break — keep looping for the next turn.
@@ -345,14 +371,25 @@ class VoiceWebSocketHandler:
                 # Tell the browser to unlock the text box and mic button
                 await self._send_status(STATUS_DONE)
 
-            # ── 8. SESSION MANAGEMENT & ERRORS ─────────────────────────────────────────────────
+            # ── 9. SESSION MANAGEMENT & ERRORS ─────────────────────────────────────────────────
+            # --- NEW: Catch Google's warning that the session is about to die! ---
+            elif event_type == "go_away":
+                log.info("triggering_graceful_reconnect_due_to_goaway", session=self.session_id)
+                # Close the browser websocket with Code 1000 so the frontend instantly reconnects!
+                await websocket.close(code=1000, reason="Gemini session refresh")
+                return
+            # --- NEW: Catch all closures and timeouts cleanly ---
             # ── SESSION CLOSED (Gemini ended connection gracefully) ─────────
             elif event_type == "session_closed":
-                # Now we notify the browser so it can reconnect.
                 reason = event.get("reason", "unknown")
-                log.info("gemini_session_closed_gracefully",
-                         reason=reason, session=self.session_id)
-                await self._send_status(STATUS_ERROR, "Session ended — reconnecting...")
+                log.info("gemini_session_closed_gracefully", reason=reason, session=self.session_id)
+                
+                # If it was a timeout, a 1008 bug, or a 1001 drop, instantly reconnect!
+                if reason in ["gemini_timeout", "gemini_live_1008", "normal_closure"] or event.get("retryable"):
+                    await websocket.close(code=1000, reason="Gemini session refresh")
+                else:
+                    await websocket.close(code=1000, reason="Session closed")
+                return
             
             # ── ERROR ─────────────────────────────────────────────────────
             elif event_type == MSG_ERROR:
