@@ -20,7 +20,8 @@ from typing import Any
 
 import structlog
 # 1. We keep WooCommerce client for getting live details
-from voice_commerce.services import woocommerce_client
+# from voice_commerce.services.woocommerce_client import get_client
+from voice_commerce.services.csv_client import get_client
 # 2. We import our new Brain for searching
 from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.models.tool_response import ToolResponse
@@ -97,7 +98,7 @@ async def get_product_details(product_id: int, session_id: str = "default") -> T
     log.info("get_product_details", product_id=product_id)
 
     try:
-        client = woocommerce_client.get_client()
+        client = get_client()
         # 1. Fetch live Pydantic Product objects
         product = await client.get_product(product_id=product_id) # Live internet search!
         if not product:

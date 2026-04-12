@@ -32,8 +32,8 @@ from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.core.rag.retriever import Retriever
 from voice_commerce.models.product import Product
-from voice_commerce.services.woocommerce_client import get_client
-
+# from voice_commerce.services.woocommerce_client import get_client
+from voice_commerce.services.csv_client import get_client
 
 log = structlog.get_logger()
 

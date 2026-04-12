@@ -15,7 +15,8 @@ from __future__ import annotations
 import structlog
 
 # 1. Import our Live Client and our Pydantic Models!
-from voice_commerce.services.woocommerce_client import get_client
+# from voice_commerce.services.woocommerce_client import get_client
+from voice_commerce.services.csv_client import get_client
 from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.models.cart import Cart, CartItem
 

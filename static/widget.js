@@ -2250,10 +2250,12 @@
 
         if (panel) panel.classList.remove('vc-panel--visible');
         if (fab) fab.classList.remove('vc-fab--open');
-        if (icon) icon.textContent = '🎙️';
+        if (icon && !STATE.isRecording) {
+            icon.textContent = '🎙️';
+        }
 
         /* Stop mic if recording */
-        _stopMic();
+        // _stopMic();
     }
 
     /* ── Toast notifications ────────────────────────────────────────────────── */

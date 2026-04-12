@@ -199,6 +199,7 @@ class VoiceWebSocketHandler:
                 except json.JSONDecodeError:
                     pass
 
+                # ── TEXT FRAME = typed message or control JSON ─────────────
                 user_text = self._parse_text_message(raw_text)
 
                 if not user_text.strip():
@@ -248,6 +249,10 @@ class VoiceWebSocketHandler:
 
             # ──2 OUTPUT TRANSCRIPT (Text of what Gemini SAID) ──────────────────────
             elif event_type == "output_transcript":
+                if "[SILENT_UPDATE]" in event["text"]:
+                    log.info("output_transcript_silent_update",text=event["text"],session_id=self.session_id)
+                    continue
+                    
                 ai_transcript_text: str = event["text"]
                 ai_transcript_parts.append(ai_transcript_text)
 
@@ -272,6 +277,7 @@ class VoiceWebSocketHandler:
 
             # ── 4. TEXT CHUNK (rare in audio mode) ───────────────────────────
             elif event_type == MSG_TEXT:
+                log.info("text_chunk_received",text=event["text"],session_id=self.session_id)
                 # THE FIX: Intercept the silent acknowledgment so it doesn't show in the chat UI!
                 if "[SILENT_UPDATE]" in event["text"]:
                     continue

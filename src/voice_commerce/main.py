@@ -85,41 +85,58 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
         woocommerce_configured=settings.is_woocommerce_configured,
     )
 
-    ## 1.Create WooCommerce Client
+    # ## 1.Create WooCommerce Client
+    # #-------------------------------------------------------------------------------------------------------------------
+    # if settings.is_woocommerce_configured:
+    #     wc_client = await woocommerce_client.initialize()
+    #     # Store on app.state so tools can access it
+    #     app.state.wc_client = wc_client
+    #     log.info("app_startup_woocommerce_connected")
+        
+
+    #     # ── PHASE 7: START RAG BRAIN SYNC ──
+    #     # the AI will download products and do math in the background.
+    #     rag = get_rag_service()
+    #     asyncio.create_task(rag.sync_catalog())
+    #     log.info("app_startup_rag_service_initialized")
+    # else:
+    #     log.warning("app_startup_woocommerce_skipped", 
+    #         message="WooCommerce keys missing from .env. Running in disconnected mode.")
+
     #-------------------------------------------------------------------------------------------------------------------
-    if settings.is_woocommerce_configured:
-        wc_client = await woocommerce_client.initialize()
-        # Store on app.state so tools can access it
-        app.state.wc_client = wc_client
-        log.info("app_startup_woocommerce_connected")
 
-
-        # ── PHASE 7: START RAG BRAIN SYNC ──
-        # the AI will download products and do math in the background.
-        rag = get_rag_service()
-        asyncio.create_task(rag.sync_catalog())
-        log.info("app_startup_rag_service_initialized")
-    else:
-        log.warning("app_startup_woocommerce_skipped", 
-            message="WooCommerce keys missing from .env. Running in disconnected mode.")
-
+    ## 1. Create CSV Client
     #-------------------------------------------------------------------------------------------------------------------
+    # This instantly loads your products.csv into memory
+    from voice_commerce.services import csv_client
+    store_client = await csv_client.initialize(csv_path=r"P:\AI_Empire\Projects\voice-commerce-agent\tests\products.csv")
+    app.state.store_client = store_client
+    log.info("app_startup_csv_store_connected")
 
-
+    # ── PHASE 7: START RAG BRAIN SYNC ──
+    # The AI will instantly embed the CSV products in the background.
+    rag = get_rag_service()
+    asyncio.create_task(rag.sync_catalog())
+    log.info("app_startup_rag_service_initialized")
+    #-------------------------------------------------------------------------------------------------------------------
     yield
 
     # --- SHUTDOWN ---
     log.info("Application  shutting down...")
 
-    ## 1. Shutdown: close the httpx client 
+    # ## 1. Shutdown: close the httpx client 
+    # #-------------------------------------------------------------------------------------------------------------------
+    # if settings.is_woocommerce_configured:
+    #     await woocommerce_client.shutdown()
+    #     log.info("app_shutdown_woocommerce_disconnected")
+
+    # #-------------------------------------------------------------------------------------------------------------------
+
+    ## 1. Shutdown: Clear the CSV client memory
     #-------------------------------------------------------------------------------------------------------------------
-    if settings.is_woocommerce_configured:
-        await woocommerce_client.shutdown()
-        log.info("app_shutdown_woocommerce_disconnected")
-
+    await csv_client.shutdown()
+    log.info("app_shutdown_csv_store_disconnected")
     #-------------------------------------------------------------------------------------------------------------------
-
-
 
 
     log.info("Application  shut down completed")
