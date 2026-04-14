@@ -1,16 +1,18 @@
 from __future__ import annotations
 import csv
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import structlog
 
-# THE FIX: Import the Product model right here in the client!
 from voice_commerce.models.product import Product
 
 log = structlog.get_logger(__name__)
 
-csv_default_path = r"P:\AI_Empire\Projects\voice-commerce-agent\tests\products.csv"
+# Resolve path relative to this file: src/voice_commerce/services/ → up 3 → project root
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+csv_default_path = str(_PROJECT_ROOT / "tests" / "products.csv")
 class CSVAPIError(Exception):
     """Base exception for all CSV client errors."""
     pass
