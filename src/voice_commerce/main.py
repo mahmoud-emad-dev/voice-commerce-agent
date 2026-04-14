@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     #-------------------------------------------------------------------------------------------------------------------
     # This instantly loads your products.csv into memory
     from voice_commerce.services import csv_client
-    store_client = await csv_client.initialize(csv_path=r"P:\AI_Empire\Projects\voice-commerce-agent\tests\products.csv")
+    store_client = await csv_client.initialize()  # uses default: tests/products.csv relative to project root
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
 
