@@ -21,9 +21,10 @@ SINGLETON PATTERN:
 
 
 from __future__ import annotations
-from typing import Any
+from typing import Any, TypedDict, TypeAlias
 import re
 import time 
+from collections import Counter
 
 import structlog
 import asyncio
@@ -36,6 +37,37 @@ from voice_commerce.models.product import Product
 from voice_commerce.services.csv_client import get_client
 
 log = structlog.get_logger()
+
+
+class CategoryPathParts(TypedDict):
+    full_path: str
+    main_category: str
+    sub_category: str
+    leaf_category: str
+
+
+class CategoryProductSnapshot(TypedDict):
+    id: int
+    name: str
+    price: float
+    stock_status: str
+    main_category: str
+    sub_category: str
+    leaf_category: str
+    full_path: str
+
+
+class CategorySummaryEntry(TypedDict):
+    count: int
+    example_names: list[str]
+    min_price: float
+    max_price: float
+    subcategories: list[str]
+    parent_groups: list[str]
+
+
+CategorySummary: TypeAlias = dict[str, CategorySummaryEntry]
+ProductsByCategory: TypeAlias = dict[str, list[CategoryProductSnapshot]]
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 _service_instance: "RagService | None" = None
@@ -71,6 +103,164 @@ class RagService:
         self.retriever = Retriever(self.v_store)
         self._sync_complete = False
         self._products_indexed = 0
+        self._category_summary: CategorySummary = {}
+        self._products_by_category: ProductsByCategory = {}
+
+    @staticmethod
+    def _parse_category_path(raw_name: str) -> CategoryPathParts:
+        """
+        Parse category hierarchy into full/main/sub/leaf names.
+        Supports single-level and hierarchical paths (e.g. "Men > Shoes > Running").
+        """
+        clean_name = str(raw_name or "").strip()
+        if not clean_name:
+            return {
+                "full_path": "Uncategorized",
+                "main_category": "Uncategorized",
+                "sub_category": "Uncategorized",
+                "leaf_category": "Uncategorized",
+            }
+
+        segments = [part.strip() for part in clean_name.split(">") if part.strip()]
+        if not segments:
+            segments = ["Uncategorized"]
+
+        main_category = segments[0]
+        sub_category = segments[1] if len(segments) > 1 else main_category
+        leaf_category = segments[-1]
+        return {
+            "full_path": " > ".join(segments),
+            "main_category": main_category,
+            "sub_category": sub_category,
+            "leaf_category": leaf_category,
+        }
+
+    @classmethod
+    def _build_product_snapshot(cls, product: Product, parsed_path: CategoryPathParts) -> CategoryProductSnapshot:
+        """Build the slim deterministic snapshot used for grouped category retrieval."""
+        return {
+            "id": product.id,
+            "name": product.name,
+            "price": float(product.price),
+            "stock_status": product.stock_status,
+            "main_category": parsed_path["main_category"],
+            "sub_category": parsed_path["sub_category"],
+            "leaf_category": parsed_path["leaf_category"],
+            "full_path": parsed_path["full_path"],
+        }
+
+    @staticmethod
+    def _copy_product_snapshot(item: CategoryProductSnapshot) -> CategoryProductSnapshot:
+        """Return a typed shallow copy of a category product snapshot."""
+        return {
+            "id": item["id"],
+            "name": item["name"],
+            "price": item["price"],
+            "stock_status": item["stock_status"],
+            "main_category": item["main_category"],
+            "sub_category": item["sub_category"],
+            "leaf_category": item["leaf_category"],
+            "full_path": item["full_path"],
+        }
+
+    @staticmethod
+    def _copy_category_summary_entry(data: CategorySummaryEntry) -> CategorySummaryEntry:
+        """Return a typed shallow copy of a category summary entry."""
+        return {
+            "count": data["count"],
+            "example_names": list(data["example_names"]),
+            "min_price": data["min_price"],
+            "max_price": data["max_price"],
+            "subcategories": list(data["subcategories"]),
+            "parent_groups": list(data["parent_groups"]),
+        }
+
+    def _build_category_indexes(self, products: list[Product]) -> tuple[CategorySummary, ProductsByCategory]:
+        """
+        Build category summary and grouped product snapshots from loaded products.
+        Grouping key is the leaf category because UX/tooling uses product-type filters
+        like Bags, Jackets, Pants, Watches (not high-level containers like Clothing).
+        """
+        log.debug("rag_category_index_build_start", product_count=len(products))
+        grouped: ProductsByCategory = {}
+
+        for product in products:
+            if product.categories:
+                raw_paths = [cat.name for cat in product.categories if cat.name]
+            else:
+                raw_paths = ["Uncategorized"]
+
+            # Avoid duplicate category path processing for the same product
+            for raw_path in set(raw_paths):
+                parsed = self._parse_category_path(raw_path)
+                leaf_category = parsed["leaf_category"]
+                grouped.setdefault(leaf_category, []).append(self._build_product_snapshot(product, parsed))
+
+        summary: CategorySummary = {}
+        for category, items in grouped.items():
+            items_sorted = sorted(items, key=lambda item: (item["name"].lower(), item["id"]))
+            subcategory_counts = Counter(item["sub_category"] for item in items_sorted if item["sub_category"])
+            parent_groups = Counter(item["main_category"] for item in items_sorted if item["main_category"])
+            summary[category] = {
+                "count": len(items_sorted),
+                "example_names": [item["name"] for item in items_sorted[:2]],
+                "min_price": min(item["price"] for item in items_sorted),
+                "max_price": max(item["price"] for item in items_sorted),
+                "subcategories": [name for name, _ in subcategory_counts.most_common(3)],
+                "parent_groups": [name for name, _ in parent_groups.most_common(2)],
+            }
+            grouped[category] = items_sorted
+
+        log.info(
+            "rag_category_index_build_complete",
+            category_count=len(summary),
+            grouped_bucket_count=len(grouped),
+            top_categories=sorted(summary.keys())[:] if summary else [],
+        )
+        return summary, grouped
+
+    @property
+    def category_summary(self) -> CategorySummary:
+        """Safe read access to category summary metadata."""
+        return {
+            name: self._copy_category_summary_entry(data)
+            for name, data in self._category_summary.items()
+        }
+
+    @property
+    def products_by_category(self) -> ProductsByCategory:
+        """Safe read access to grouped slim product snapshots."""
+        return {
+            name: [self._copy_product_snapshot(item) for item in items]
+            for name, items in self._products_by_category.items()
+        }
+
+    def list_categories(self) -> list[str]:
+        """Return known leaf categories sorted by descending product count."""
+        return [
+            name
+            for name, _ in sorted(
+                self._category_summary.items(),
+                key=lambda pair: (-int(pair[1].get("count", 0)), pair[0].lower()),
+            )
+        ]
+
+    def get_products_for_category(
+        self,
+        category: str,
+        *,
+        max_price: float | None = None,
+        in_stock_only: bool = False,
+    ) -> list[CategoryProductSnapshot]:
+        """
+        Internal deterministic retrieval helper for future category-search tool.
+        """
+        items = [self._copy_product_snapshot(item) for item in self._products_by_category.get(category, [])]
+        if max_price is not None:
+            items = [item for item in items if item["price"] <= max_price]
+        if in_stock_only:
+            items = [item for item in items if item["stock_status"] == "instock"]
+        return items
 
 
     # ── Catalog sync ──────────────────────────────────────────────────────────
@@ -94,6 +284,15 @@ class RagService:
         if not all_products:
             log.warning("rag_sync_no_products")
             return 0
+
+        # 1.5 Build category intelligence caches for prompt/context and deterministic retrieval.
+        self._category_summary, self._products_by_category = self._build_category_indexes(all_products)
+        log.info(
+            "rag_category_caches_ready",
+            category_count=len(self._category_summary),
+            grouped_category_count=len(self._products_by_category),
+            sample_categories=list(self._category_summary.keys())[:],
+        )
 
         log.info("rag_sync_building_texts", count=len(all_products))
 
@@ -174,4 +373,5 @@ class RagService:
             "sync_complete": self._sync_complete,
             "products_indexed": self._products_indexed,
             "qdrant_count": self.v_store.count,
+            "category_count": len(self._category_summary),
         }
