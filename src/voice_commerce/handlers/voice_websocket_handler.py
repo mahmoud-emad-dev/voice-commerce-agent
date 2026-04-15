@@ -73,6 +73,8 @@ class VoiceWebSocketHandler:
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
+        self._user_started_interaction = False
+        self._startup_greeting_sent = False
         self.action_dispatcher = ActionDispatcher()
         log.info("voice_handler_created", session_id=self.session_id)
 
@@ -108,6 +110,12 @@ class VoiceWebSocketHandler:
                 if not self._resumption_handle and len(self._transcript) == 0:
                     async def delayed_greeting():
                         await asyncio.sleep(1.5) 
+                        if self._user_started_interaction:
+                            log.info("startup_greeting_skipped_user_already_active", session_id=self.session_id)
+                            return
+                        if self._startup_greeting_sent:
+                            return
+                        self._startup_greeting_sent = True
                         log.info("triggering_proactive_greeting", session_id=self.session_id)
                         await gemini.send_text("--- SYSTEM: The user just connected to the store. Greet them warmly in one short sentence and ask what they are looking for today. ---")
                     asyncio.create_task(delayed_greeting())
@@ -173,6 +181,7 @@ class VoiceWebSocketHandler:
 
             # ── 1. HANDLE AUDIO (Microphone) ──────────────────────────────
             if raw_bytes :
+                self._user_started_interaction = True
                 if self._input_mode == "text":
                     self._input_mode = "audio"
                     log.info("input_mode_switched_to_audio",session_id=self.session_id)
@@ -223,6 +232,7 @@ class VoiceWebSocketHandler:
                 if not user_text.strip():
                     continue
 
+                self._user_started_interaction = True
                 self._input_mode = "text"
                 log.info("text_message_received",preview=user_text[:80], session_id=self.session_id)
 

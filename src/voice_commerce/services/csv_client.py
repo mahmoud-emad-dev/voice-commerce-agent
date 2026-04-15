@@ -74,7 +74,12 @@ class CSVProductClient:
                     categories = []
                     for cat in raw_cats:
                         if cat.strip():
+                            # Note: stores only leaf name. Full path ("Men > Shoes > Running") is intentionally
+                            # discarded for CSV simplicity. rag_service._parse_category_path() handles full paths
+                            # when WooCommerce is the backend.
                             clean_name = cat.split(">")[-1].strip()
+                            if not clean_name:
+                                continue
                             categories.append({"id": 0, "name": clean_name, "slug": clean_name.lower()})
                     # Safely handle empty prices from the CSV
                     raw_sale_price = row.get("Sale price", "").strip()

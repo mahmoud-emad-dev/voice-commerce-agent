@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     cors_allow_origins: list[str] = ["*"]
 
     # =========================================================================
+    # STORE SETTINGS
+    # ========================================================================
+    store_name: str = "NEXFIT"
+    assistant_name:  str = "PHOENIX"
+    store_tagline:   str = "Your go-to store for performance sports gear."
+
+    # =========================================================================
     # WooCommerce SETTINGS
     # =========================================================================
     wc_store_url:       str = ""
