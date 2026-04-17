@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import structlog
 from google.genai import types
 
-from voice_commerce.core.tools import tool_registry , cart_tools, product_tools
+from voice_commerce.core.tools import tool_registry , cart_tools, product_tools, context_tools
 from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
@@ -26,6 +26,7 @@ class ToolContext:
 
 
 _TOOLS: dict[str, Any] = {
+    "get_screen_context": context_tools.get_screen_context,
     "search_products": product_tools.search_products,
     "get_product_details": product_tools.get_product_details,
     "add_to_cart": cart_tools.add_to_cart,

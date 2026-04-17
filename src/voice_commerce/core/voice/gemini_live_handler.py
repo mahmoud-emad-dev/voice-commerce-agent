@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 from  collections.abc import AsyncGenerator
 from typing import Any
-from datetime import datetime
 
 import structlog
 from google import genai
@@ -75,7 +74,6 @@ class GeminiLiveHandler:
                         # Charon: clear, neutral — good for shopping assistant
                         )
                     ),
-                language_code="en-US",
                 ),
             input_audio_transcription=types.AudioTranscriptionConfig(),   
             output_audio_transcription=types.AudioTranscriptionConfig(),
@@ -189,63 +187,15 @@ class GeminiLiveHandler:
             ],
         )
 
-    async def inject_live_context(self, page: dict, products: list[dict]) -> None:
+    async def send_audio_stream_end(self) -> None:
         """
-        Silently updates Gemini's session memory with current page state.
+        Tell Gemini that the current user audio stream has ended.
+        This helps Gemini flush buffered speech and respond sooner.
         """
         if self._session is None:
-            return
+            raise RuntimeError("Cannot end audio stream: session not connected.")
 
-        # Format the products for the AI
-        product_text = ""
-        for index, p in enumerate(products, start=1):
-            product_text += f"{index}. ID: {p.get('id')} | Name: {p.get('name')} | Price: {p.get('price')}\n"
-
-        # Format the active filters
-        filters = page.get('active_filters', [])
-        filters_text = ", ".join(filters) if filters else "None"
-
-        if not product_text:
-            product_text = "No products currently visible."
-        updated_at = datetime.now().strftime("%H:%M:%S")
-        # Construct the silent system injection prompt
-        context_msg = (
-                    f"--- SYSTEM CONTEXT INJECTION last update at {updated_at}  ---\n"
-                    "The user's screen has just updated. You now have access to their live view.\n"
-                    f"Current URL: {page.get('url', 'Unknown')}\n"
-                    f"Active Filters/Categories: {filters_text}\n"
-                    f"Total Items in Cart: {page.get('cart_count', 0)}\n\n"
-                    "VISIBLE PRODUCTS ON SCREEN (Numbered in order):\n"
-                    f"{product_text}\n"
-                    "CRITICAL RULES:\n"
-                    "- If the user says 'the first one', 'the second one', look at the numbered list above.\n"
-                    "- NEVER invent or guess a product ID. If a product is not in the list above, or returned by a tool, say you don't see it.\n"
-                    "CRITICAL INSTRUCTIONS FOR THIS UPDATE:\n"
-                    "1. Update your internal memory with this new screen state.\n"
-                    "2. DO NOT respond to this message with any audio whatsoever.\n"
-                    "3. Do not say 'Okay', 'Understood', or anything else.\n"
-                    "4. Acknowledge this silently by outputting exactly the text '[SILENT_UPDATE]' and nothing else."
-                )
-
-        log.debug("gemini_injecting_context", items=len(products), filters=filters_text)
-        log.info("gemini_injecting_context", context_msg=context_msg)
-        # Send to Gemini using the exact types.Content formatting your file uses
-        await self._session.send_client_content(
-            turns=types.Content(
-                role="user",
-                parts=[types.Part(text=context_msg)]
-            ),
-            turn_complete=True,
-        )
-    # async def send_audio_stream_end(self) -> None:
-    #     """
-    #     Tell Gemini that the current user audio stream has ended.
-    #     This helps Gemini flush buffered speech and respond sooner.
-    #     """
-    #     if self._session is None:
-    #         raise RuntimeError("Cannot end audio stream: session not connected.")
-
-    #     await self._session.send_realtime_input(audio_stream_end=True)
+        await self._session.send_realtime_input(audio_stream_end=True)
 
     # =========================================================================
     # RECEIVING Events METHOD (Gemini -> App)
@@ -262,9 +212,9 @@ class GeminiLiveHandler:
             while True:
                 saw_message_in_this_receive_call = False
                 response: types.LiveServerMessage
-                is_audio: bool = False
                 async for response in self._session.receive():
                     saw_message_in_this_receive_call = True
+                    is_audio = False
 
 
                     # ── 1. TOOL CALLS are top-level on Live API responses. ──────────────────────────────────────────       
@@ -292,6 +242,11 @@ class GeminiLiveHandler:
                                 ## Handle text
                                 if getattr(part, "text", None):
                                     log.debug("Received gemini_text_chunk", length=len(part.text or ""))
+                                    yield {
+                                        "type": "model_turn_text",
+                                        "text": part.text,
+                                        "thought": bool(getattr(part, "thought", False)),
+                                    }
                                     if hasattr(part, "thought") and not part.thought:
                                         yield {"type": "text", "text": part.text}
 
@@ -316,6 +271,10 @@ class GeminiLiveHandler:
                             log.debug("gemini_output_transcript", text=output_trans.text[:100])
                             yield {"type": "output_transcript", "text": output_trans.text}
 
+                        if server_content.generation_complete:
+                            log.debug("gemini_generation_complete")
+                            yield {"type": "generation_complete"}
+
 
                         # 4) Turn complete signal.
                         if server_content.turn_complete:
@@ -336,8 +295,10 @@ class GeminiLiveHandler:
                         log.warning("gemini_go_away", time_left=time_left)
                         yield {"type": "go_away", "time_left": time_left}
                     
-                    # if not is_audio:
-                        # log.info("Received response from Gemini:", response=str(response)[:])  # log a preview of the raw response for debugging Temp
+                    if is_audio:
+                        log.info("Received response from Gemini: audio chunk")
+                    else:
+                        log.info("Received response from Gemini", response=str(response))
 
                 # ── 7. DEAD CONNECTION DETECTOR ────────────────────────────────
                 if not saw_message_in_this_receive_call:

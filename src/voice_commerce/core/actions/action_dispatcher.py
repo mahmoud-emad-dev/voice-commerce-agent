@@ -114,7 +114,11 @@ class ActionDispatcher:
           4. Highlight the product (if we know the ID)
         """
         product_id : int | None = tool_args.get("product_id")
-        product_name : str | None = tool_args.get("product_name" , "Item")
+        product_name : str = (
+            tool_result.get("product_name")
+            or tool_args.get("product_name")
+            or "Item"
+        )
         cart_count : int | None = tool_result.get("cart_count" ,1)
 
         actions: list[BrowserAction] = [
@@ -130,7 +134,11 @@ class ActionDispatcher:
     
     def _on_remove_from_cart(self, tool_args: dict[str, Any], tool_result: dict[str, Any]) -> list[BrowserAction]:
         """After removing from cart: update badge, info toast."""
-        product_name : str | None = tool_args.get("product_name" , "Item")
+        product_name : str = (
+            tool_result.get("product_name")
+            or tool_args.get("product_name")
+            or "Item"
+        )
         cart_count : int | None = tool_result.get("cart_count" ,1)
         
         actions: list[BrowserAction] = [
