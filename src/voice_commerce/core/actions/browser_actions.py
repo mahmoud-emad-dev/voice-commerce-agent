@@ -76,12 +76,15 @@ class CloseCart(_ActionBase):
 ## Other Actions
 class ShowProductModal(_ActionBase):
     """
-    Open a quick-view modal for a product without navigating away.
-    The widget JS fetches product HTML from WooCommerce and injects it.
+    Open a quick-view modal for a product.
+    product_data carries display fields so the modal never scrapes the DOM.
+    All display data travels with the action — DOM may not have this product visible.
     """
     action: Literal["show_product_modal"] = "show_product_modal"
     product_id: int
-    product_name: str            # used in modal title before fetch completes
+    product_name: str
+    delay_ms: int = 0
+    product_data: dict | None = None
 
 
 class ShowNotification(_ActionBase):

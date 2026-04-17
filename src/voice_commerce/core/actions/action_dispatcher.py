@@ -101,16 +101,48 @@ class ActionDispatcher:
         """
         product : dict[str, Any] | None = tool_result.get("product")
         if not product:
-            return [notify(_toast_line("No product found."), "error")]
+            return [notify(_toast_line("Product details not found."), "error")]
         
         pid : int | None = product.get("id")
         product_name : str  = product.get("name" , "Product"  )
         if not pid:
-            return [notify(_toast_line("No product ID found."), "error")]
-        
+            return [notify(_toast_line("Missing product ID."), "error")]
+
+        images = product.get("images", [])
+        thumbnail = product.get("thumbnail", "")
+        if not thumbnail and images and isinstance(images[0], dict):
+            thumbnail = images[0].get("src", "")
+
+        price = product.get("price", "") or product.get("display_price", "")
+        short_desc = product.get("short_description", "") or product.get("short_desc", "")
+
+        category = product.get("category", "")
+        if not category:
+            categories = product.get("categories", [])
+            if categories:
+                first_cat = categories[0]
+                if isinstance(first_cat, dict):
+                    category = first_cat.get("name", "")
+                else:
+                    category = str(first_cat)
+
+        product_data = {
+            "thumbnail": thumbnail,
+            "price": price,
+            "short_desc": short_desc,
+            "category": category,
+        }
+
         actions: list[BrowserAction] = [ClearHighlights()]
-        actions.append(ShowProductModal(product_id=pid , product_name=product_name))
         actions.append(highlight(product_id=pid, scroll=True))
+        actions.append(
+            ShowProductModal(
+                product_id=pid,
+                product_name=product_name,
+                product_data=product_data,
+                delay_ms=900,
+            )
+        )
         return actions
     
     

@@ -108,7 +108,16 @@ async def get_product_details(product_id: int, session_id: str = "default") -> T
             )
         # 4. Return the deep-dive formatting built directly into our Pydantic model!
         response = product.to_tool_response(detailed=True)
-        return ToolResponse.success(ai_text=response["ai_text"], data={"product": response["data"]})
+        product_data = response["data"]
+        product_data.update(
+            {
+                "price": product.display_price,
+                "short_description": product.short_description,
+                "thumbnail": product.images[0].get("src", "") if product.images else "",
+                "categories": [{"name": c.name} for c in product.categories],
+            }
+        )
+        return ToolResponse.success(ai_text=response["ai_text"], data={"product": product_data})
 
     except RuntimeError:
         # Caught if settings are missing and WooCommerce never initialized
