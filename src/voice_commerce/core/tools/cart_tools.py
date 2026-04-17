@@ -71,7 +71,7 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
         cart = _get_cart(session_id)
 
         if product_id in cart.items:
-            cart.items[product_id].quantity = quantity
+            cart.items[product_id].quantity += quantity
             action = "Updated"
         else:
             cart.items[product_id] = CartItem(
@@ -135,7 +135,10 @@ async def remove_from_cart(product_id: int,session_id: str = "default") -> ToolR
     del cart.items[product_id]
  
     if cart.is_empty():
-        return ToolResponse.success(f"Removed {name}. Your cart is now empty.")
+        return ToolResponse.success(
+            ai_text=f"Removed {name}. Your cart is now empty.",
+            data={"cart_count": 0}
+        )
     
     # We must pass cart_count so the UI badge updates correctly!
     ai_text = f"Removed {name} from your cart. New total: ${cart.total:.2f}"

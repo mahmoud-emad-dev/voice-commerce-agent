@@ -187,7 +187,7 @@ class VoiceWebSocketHandler:
                     log.info("input_mode_switched_to_audio",session_id=self.session_id)
                 
                 # Skip tiny chunks (browser may send near-silence)
-                if len(raw_bytes) < 64:
+                if len(raw_bytes) < 32:
                     log.info("send audio chunk from browser skipped",bytes=len(raw_bytes)) # for test  as temp
                     continue   
                 
