@@ -93,16 +93,22 @@ ADD_TO_CART_TOOL = types.Tool(
             name="add_to_cart",
             description=(
                 "Add a product to the customer's shopping cart. "
-                "Only call this after the product is explicit and the customer clearly confirmed. "
-                "Do not infer confirmation from vague replies or unrelated speech. "
-                "If quantity is unclear, ask first."
+                "Only call this after the customer clearly confirms they want this specific product. "
+                "product_id MUST be the exact integer ID returned by search_products or get_product_details. "
+                "Never guess, invent, or derive a product_id from the product name. "
+                "If you do not have a confirmed integer product_id, call search_products first. "
+                "Example: user says 'add the first one' after search returned id=47 -> "
+                "call add_to_cart(product_id=47, quantity=1)."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
                     "product_id": types.Schema(
                         type=types.Type.INTEGER,
-                        description="The numeric ID of the product to add.",
+                        description=(
+                            "The integer product ID returned by search_products. "
+                            "Must be a number (e.g., 42), not a product name string."
+                        ),
                     ),
                     "quantity": types.Schema(
                         type=types.Type.INTEGER,
