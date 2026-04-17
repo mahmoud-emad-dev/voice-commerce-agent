@@ -32,6 +32,7 @@ from voice_commerce.api.routes import health , voice ,widget
 from voice_commerce.api.middleware.cors import add_cors_middleware
 from voice_commerce.services import woocommerce_client
 from voice_commerce.services.rag_service import get_rag_service
+from voice_commerce.core.voice.trace_logger import get_trace_run_id
 
 log = structlog.get_logger(__name__)
 
@@ -83,6 +84,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
         debug=settings.app_debug,
         model=settings.gemini_model,
         woocommerce_configured=settings.is_woocommerce_configured,
+        trace_run_id=get_trace_run_id(),
+        trace_root=settings.voice_trace_root,
+        trace_enabled=settings.voice_trace_enabled,
     )
 
     # ## 1.Create WooCommerce Client

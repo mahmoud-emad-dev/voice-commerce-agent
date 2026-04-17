@@ -25,8 +25,14 @@ from voice_commerce.services.csv_client import get_client
 # 2. We import our new Brain for searching
 from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.models.tool_response import ToolResponse
+from voice_commerce.models.screen_context import get_screen_cache
 
 log = structlog.get_logger(__name__)
+
+
+def _append_screen_hint(ai_text: str, session_id: str) -> str:
+    hint = get_screen_cache(session_id).render_short_hint()
+    return f"{ai_text}\n{hint}" if hint else ai_text
 
 
 
@@ -72,7 +78,7 @@ async def search_products(query: str, max_price: float | None = None, category: 
             ui_products.append(response_dict["data"])
 
         lines.append("\nTo add one to your cart, just say which one.")
-        ai_text = "\n".join(lines)
+        ai_text = _append_screen_hint("\n".join(lines), session_id)
         # 4. Return the explicit ToolResponse
         return ToolResponse.success(
             ai_text=ai_text,
@@ -108,7 +114,8 @@ async def get_product_details(product_id: int, session_id: str = "default") -> T
             )
         # 4. Return the deep-dive formatting built directly into our Pydantic model!
         response = product.to_tool_response(detailed=True)
-        return ToolResponse.success(ai_text=response["ai_text"], data={"product": response["data"]})
+        ai_text = _append_screen_hint(response["ai_text"], session_id)
+        return ToolResponse.success(ai_text=ai_text, data={"product": response["data"]})
 
     except RuntimeError:
         # Caught if settings are missing and WooCommerce never initialized

@@ -19,6 +19,7 @@ import structlog
 from voice_commerce.services.csv_client import get_client
 from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.models.cart import Cart, CartItem
+from voice_commerce.models.screen_context import get_screen_cache
 
 log = structlog.get_logger(__name__)
 
@@ -26,6 +27,12 @@ log = structlog.get_logger(__name__)
 # Survives multiple conversation turns within one session.
 
 _CARTS: dict[str, Cart] = {} 
+
+
+def _append_screen_hint(ai_text: str, session_id: str) -> str:
+    hint = get_screen_cache(session_id).render_short_hint()
+    return f"{ai_text}\n{hint}" if hint else ai_text
+
 
 def _get_cart(session_id: str) -> Cart:
     """Helper to get the cart for a session, creating it if it doesn't exist."""
@@ -71,7 +78,7 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
         cart = _get_cart(session_id)
 
         if product_id in cart.items:
-            cart.items[product_id].quantity = quantity
+            cart.items[product_id].quantity += quantity
             action = "Updated"
         else:
             cart.items[product_id] = CartItem(
@@ -92,6 +99,7 @@ async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "def
             f"Cart total: ${cart.total:.2f} "
             f"({cart.item_count} item{'s' if cart.item_count != 1 else ''})"
         )
+        ai_text = _append_screen_hint(ai_text, session_id)
         # 4. Return the explicit data the Action Dispatcher needs for the UI
         return ToolResponse.success(
             ai_text=ai_text ,
@@ -117,7 +125,8 @@ async def show_cart(session_id: str = "default") -> ToolResponse:
     log.info("show_cart", session=session_id)
     cart = _get_cart(session_id)
     response = cart.to_tool_response()
-    return ToolResponse.success(ai_text=response["ai_text"] , data=response["data"])
+    ai_text = _append_screen_hint(response["ai_text"], session_id)
+    return ToolResponse.success(ai_text=ai_text , data=response["data"])
 
 
 async def remove_from_cart(product_id: int,session_id: str = "default") -> ToolResponse:
@@ -135,10 +144,20 @@ async def remove_from_cart(product_id: int,session_id: str = "default") -> ToolR
     del cart.items[product_id]
  
     if cart.is_empty():
-        return ToolResponse.success(f"Removed {name}. Your cart is now empty.")
+        ai_text = _append_screen_hint(
+            f"Removed {name}. Your cart is now empty.",
+            session_id,
+        )
+        return ToolResponse.success(
+            ai_text=ai_text ,
+            data={"cart_count": 0, "product_id": product_id, "product_name": name},
+            )
     
     # We must pass cart_count so the UI badge updates correctly!
-    ai_text = f"Removed {name} from your cart. New total: ${cart.total:.2f}"
+    ai_text = _append_screen_hint(
+        f"Removed {name} from your cart. New total: ${cart.total:.2f}",
+        session_id,
+    )
     return ToolResponse.success(
         ai_text=ai_text ,
         data={

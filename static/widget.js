@@ -74,6 +74,19 @@
         return fallback !== undefined ? fallback : '';
     }
 
+    function _cfgBool(attr, fallback) {
+        if (_scriptTag && _scriptTag.dataset[attr] !== undefined) {
+            var value = String(_scriptTag.dataset[attr]).toLowerCase();
+            if (value === 'true' || value === '1' || value === 'yes' || value === 'on') {
+                return true;
+            }
+            if (value === 'false' || value === '0' || value === 'no' || value === 'off') {
+                return false;
+            }
+        }
+        return !!fallback;
+    }
+
     /** Build the default WebSocket URL based on the current page's protocol/host */
     function _defaultWsUrl() {
         var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -106,6 +119,10 @@
         // Audio
         serverSampleRate: 16000,   // PCM rate sent TO server (Gemini input)
         playbackSampleRate: 24000,   // PCM rate received FROM server (Gemini output)
+        maxMicTurnMs: 0,          // 0 disables forced auto-stop; user controls mic turn length
+        echoCancellation: _cfgBool('echoCancellation', true),
+        noiseSuppression: _cfgBool('noiseSuppression', false),
+        autoGainControl: _cfgBool('autoGainControl', false),
 
         // Behaviour
         autoConnect: true,    // connect WebSocket when panel opens
@@ -903,6 +920,9 @@
         wsStatus: 'disconnected',   /* disconnected | connecting | connected | error */
         reconnectCount: 0,
         reconnectTimer: null,
+        traceQueue: [],
+        traceSeq: 0,
+        traceChunkCount: 0,
 
         /* Audio playback (Gemini → browser) */
         playbackCtx: null,
@@ -914,6 +934,8 @@
         micAudioCtx: null,
         micWorklet: null,
         micWorkletUrl: null,
+        micAutoStopTimer: null,
+        activePlaybackSources: [],
 
         /* Cart */
         cartCount: 0,
@@ -939,6 +961,53 @@
      *   Text JSON type=transcript → chat bubble → Section 9 (chat UI)
      *   Text JSON type=action     → browser command → Section 10 (actions)
      * ══════════════════════════════════════════════════════════════════════════ */
+
+    function _trace(event, payload) {
+        var entry = {
+            type: 'client_trace',
+            event: event,
+            payload: Object.assign({
+                seq: ++STATE.traceSeq,
+                session_id: CONFIG.sessionId,
+                page_url: window.location.href,
+                panel_open: STATE.panelOpen,
+                ws_status: STATE.wsStatus,
+                is_recording: STATE.isRecording,
+                ai_speaking: !!STATE.aiSpeaking
+            }, payload || {})
+        };
+
+        if (!_wsSendJSON(entry)) {
+            STATE.traceQueue.push(entry);
+            if (STATE.traceQueue.length > 200) STATE.traceQueue.shift();
+        }
+    }
+
+    function _flushTraceQueue() {
+        if (!STATE.ws || STATE.ws.readyState !== WebSocket.OPEN) return;
+        while (STATE.traceQueue.length) {
+            STATE.ws.send(JSON.stringify(STATE.traceQueue.shift()));
+        }
+    }
+
+    function _summarizePcmChunk(buffer) {
+        var samples = new Int16Array(buffer);
+        var peak = 0;
+        var sumSquares = 0;
+        for (var i = 0; i < samples.length; i++) {
+            var v = samples[i];
+            var abs = Math.abs(v);
+            if (abs > peak) peak = abs;
+            sumSquares += v * v;
+        }
+        var rms = samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
+        return {
+            bytes: buffer.byteLength,
+            samples: samples.length,
+            rms: Math.round(rms),
+            peak: peak
+        };
+    }
 
     /* ══════════════════════════════════════════════════════════════════════════
      *  — SMART CONTEXT SCANNER (Optimized with State Signature)
@@ -1016,6 +1085,11 @@
             page: pageContext,
             products: visibleProducts
         });
+        _trace('context_update_sent', {
+            filters: activeFilters,
+            visible_products: visibleProducts.length,
+            cart_count: realCartCount
+        });
         
         console.log('[VoiceCommerce] Injected Context. Products:', visibleProducts.length, '| Filters:', activeFilters.length ? activeFilters : 'None');
     }
@@ -1034,6 +1108,10 @@
             + (CONFIG.apiKey ? '&api_key=' + encodeURIComponent(CONFIG.apiKey) : '');
 
         try {
+            _trace('ws_connect_attempt', {
+                ws_url: CONFIG.wsUrl,
+                tenant: CONFIG.tenant
+            });
             STATE.ws = new WebSocket(url);
             STATE.ws.binaryType = 'arraybuffer';
         } catch (e) {
@@ -1045,6 +1123,10 @@
         STATE.ws.onopen = function () {
             STATE.reconnectCount = 0;
             _setStatus('connected');
+            _flushTraceQueue();
+            _trace('ws_open', {
+                reconnect_count: STATE.reconnectCount
+            });
             _addSystemMsg(_i18n('connected'));
             // Wait half a second, then scan the screen!
             setTimeout(_sendContextUpdate, 500); 
@@ -1066,6 +1148,11 @@
         };
 
         STATE.ws.onclose = function (evt) {
+            _trace('ws_close', {
+                code: evt.code,
+                reason: evt.reason || '',
+                was_clean: !!evt.wasClean
+            });
 
             if (evt.code === 1000 && evt.reason === "Gemini session refresh") {
                 console.log('[VoiceCommerce] Refreshing session to bypass Gemini limits...');
@@ -1086,6 +1173,7 @@
         };
 
         STATE.ws.onerror = function () {
+            _trace('ws_error');
             _setStatus('error');
         };
 
@@ -1236,11 +1324,16 @@
         var src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(ctx.destination);
+        STATE.activePlaybackSources.push(src);
 
         var now = ctx.currentTime;
         var startAt = Math.max(now, STATE.nextPlayAt);
         src.start(startAt);
         STATE.nextPlayAt = startAt + buf.duration;
+        src.onended = function () {
+            var idx = STATE.activePlaybackSources.indexOf(src);
+            if (idx >= 0) STATE.activePlaybackSources.splice(idx, 1);
+        };
 
         /* Show typing indicator while Gemini is speaking */
         if (!STATE.aiSpeaking) {
@@ -1253,6 +1346,26 @@
             STATE.aiSpeaking = false;
             _showTyping(false);
         }, (STATE.nextPlayAt - ctx.currentTime) * 1000 + 300);
+    }
+
+    function _clearPlaybackQueue(reason) {
+        for (var i = 0; i < STATE.activePlaybackSources.length; i++) {
+            try { STATE.activePlaybackSources[i].stop(); } catch (e) { }
+        }
+        STATE.activePlaybackSources = [];
+        if (STATE.playbackCtx) {
+            STATE.nextPlayAt = STATE.playbackCtx.currentTime;
+        } else {
+            STATE.nextPlayAt = 0;
+        }
+        clearTimeout(STATE._speakingTimer);
+        if (STATE.aiSpeaking) {
+            _trace('playback_interrupted', {
+                reason: reason || 'unknown'
+            });
+        }
+        STATE.aiSpeaking = false;
+        _showTyping(false);
     }
 
     /* ══════════════════════════════════════════════════════════════════════════
@@ -1314,19 +1427,44 @@
             _showToast('Microphone not supported in this browser.', 'error');
             return;
         }
+        _trace('mic_start_requested', {
+            requested_sample_rate: CONFIG.serverSampleRate,
+            requested_echo_cancellation: CONFIG.echoCancellation,
+            requested_noise_suppression: CONFIG.noiseSuppression,
+            requested_auto_gain_control: CONFIG.autoGainControl
+        });
+        if (STATE.aiSpeaking || STATE.activePlaybackSources.length) {
+            _clearPlaybackQueue('mic_start');
+        }
 
         navigator.mediaDevices.getUserMedia({
             audio: {
-                sampleRate: CONFIG.serverSampleRate,
-                channelCount: 1,
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
+                sampleRate: { ideal: CONFIG.serverSampleRate },
+                channelCount: { ideal: 1 },
+                echoCancellation: CONFIG.echoCancellation,
+                noiseSuppression: CONFIG.noiseSuppression,
+                autoGainControl: CONFIG.autoGainControl,
             }
         }).then(function (stream) {
+            var firstTrack = stream.getAudioTracks()[0];
+            var trackSettings = firstTrack && firstTrack.getSettings
+                ? firstTrack.getSettings()
+                : {};
+            _trace('mic_get_user_media_success', {
+                audio_track_count: stream.getAudioTracks().length,
+                track_sample_rate: trackSettings.sampleRate || null,
+                track_channel_count: trackSettings.channelCount || null,
+                echo_cancellation: trackSettings.echoCancellation,
+                noise_suppression: trackSettings.noiseSuppression,
+                auto_gain_control: trackSettings.autoGainControl
+            });
             STATE.micStream = stream;
             STATE.micAudioCtx = new (window.AudioContext || window.webkitAudioContext)({
                 sampleRate: CONFIG.serverSampleRate,
+            });
+            STATE.traceChunkCount = 0;
+            _trace('mic_audio_context_created', {
+                sample_rate: STATE.micAudioCtx.sampleRate
             });
 
             return STATE.micAudioCtx.audioWorklet.addModule(_getWorkletUrl())
@@ -1336,15 +1474,44 @@
                         STATE.micAudioCtx, 'vc-pcm-processor'
                     );
                     STATE.micWorklet.port.onmessage = function (e) {
+                        STATE.traceChunkCount++;
+                        if (STATE.traceChunkCount <= 20 || STATE.traceChunkCount % 100 === 0) {
+                            _trace('mic_chunk_captured', Object.assign(
+                                { chunk_index: STATE.traceChunkCount },
+                                _summarizePcmChunk(e.data)
+                            ));
+                        }
                         _wsSend(e.data);   /* send raw PCM ArrayBuffer */
                     };
                     source.connect(STATE.micWorklet);
-                    STATE.micWorklet.connect(STATE.micAudioCtx.destination);
+                    var silentMonitor = STATE.micAudioCtx.createGain();
+                    silentMonitor.gain.value = 0;
+                    STATE.micWorklet.connect(silentMonitor);
+                    silentMonitor.connect(STATE.micAudioCtx.destination);
 
                     STATE.isRecording = true;
+                    _trace('mic_started', {
+                        sample_rate: CONFIG.serverSampleRate
+                    });
+                    clearTimeout(STATE.micAutoStopTimer);
+                    STATE.micAutoStopTimer = null;
+                    if (CONFIG.maxMicTurnMs > 0) {
+                        STATE.micAutoStopTimer = setTimeout(function () {
+                            if (STATE.isRecording) {
+                                _trace('mic_auto_stop_timeout', {
+                                    max_mic_turn_ms: CONFIG.maxMicTurnMs
+                                });
+                                _stopMic('max_turn_timeout');
+                            }
+                        }, CONFIG.maxMicTurnMs);
+                    }
                     _updateMicUI(true);
                 });
         }).catch(function (err) {
+            _trace('mic_get_user_media_error', {
+                name: err.name || '',
+                message: err.message || ''
+            });
             var msg = err.name === 'NotAllowedError'
                 ? _i18n('micDenied')
                 : 'Microphone error: ' + err.message;
@@ -1352,11 +1519,17 @@
         });
     }
 
-    function _stopMic() {
+    function _stopMic(reason) {
         if (!STATE.isRecording) return;
+        clearTimeout(STATE.micAutoStopTimer);
+        STATE.micAutoStopTimer = null;
 
         /* Signal end-of-utterance to the server */
         _wsSendJSON({ type: 'audio_end' });
+        _trace('audio_end_sent', {
+            captured_chunks: STATE.traceChunkCount,
+            reason: reason || 'manual_stop'
+        });
 
         /* Clean up media resources */
         if (STATE.micStream) {
@@ -1369,6 +1542,9 @@
         }
         STATE.micWorklet = null;
         STATE.isRecording = false;
+        _trace('mic_stopped', {
+            reason: reason || 'manual_stop'
+        });
         _updateMicUI(false);
     }
 

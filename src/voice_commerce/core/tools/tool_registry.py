@@ -93,9 +93,11 @@ ADD_TO_CART_TOOL = types.Tool(
             name="add_to_cart",
             description=(
                 "Add a product to the customer's shopping cart. "
-                "Only call this after the product is explicit and the customer clearly confirmed. "
-                "Do not infer confirmation from vague replies or unrelated speech. "
-                "If quantity is unclear, ask first."
+                "Only call this after the customer clearly confirms they want this specific product. "
+                "The product_id must be the exact integer ID returned by search_products, get_product_details, or get_screen_context. "
+                "Never guess, invent, estimate, or derive a product_id from a product name, screen position, or memory alone. "
+                "If the item is ambiguous, resolve it first. If you do not have a confirmed integer product_id, call get_screen_context, search_products, or get_product_details before add_to_cart. "
+                "Example: if search_products returned a shoe with id=47 and the user says 'add the first one', call add_to_cart(product_id=47, quantity=1)."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
@@ -160,6 +162,29 @@ REMOVE_FROM_CART_TOOL = types.Tool(
     ]
 )
 
+# -----------------------------------------------------------------------------
+# SCREEN CONTEXT TOOLS
+# -----------------------------------------------------------------------------
+
+GET_SCREEN_CONTEXT_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="get_screen_context",
+            description=(
+                "Get the user's current screen state: visible products, current URL, "
+                "active filters, and cart count. "
+                "Call this for references like 'the first one', 'the second', "
+                "'this one', or when asked what's currently on screen. "
+                "Use this before add_to_cart when selection is positional."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+            ),
+        )
+    ]
+)
+
 
 # =============================================================================
 # REGISTRY — the list exported to gemini_live_handler.py
@@ -172,6 +197,7 @@ REMOVE_FROM_CART_TOOL = types.Tool(
 
 
 ALL_TOOLS: list[types.Tool] = [
+    GET_SCREEN_CONTEXT_TOOL,
     SEARCH_PRODUCTS_TOOL,
     GET_PRODUCT_DETAILS_TOOL,
     ADD_TO_CART_TOOL,

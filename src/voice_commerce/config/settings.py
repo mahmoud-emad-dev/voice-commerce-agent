@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # =========================================================================
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-    gemini_voice_name: str = "Charon"
+    gemini_voice_name: str = "Aoede"
     
     @property
     def is_gemini_configured(self) -> bool:
@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_port: int = 8000
     app_version: str = "0.1.0"
+    voice_trace_enabled: bool = True
+    voice_trace_root: str = "local/voice_traces"
     # Which domains can make requests to this API. In production, set this to frontend's real domain name.
     cors_allow_origins: list[str] = ["*"]
 
