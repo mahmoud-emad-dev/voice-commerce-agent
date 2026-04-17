@@ -19,7 +19,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler 
 from voice_commerce.core.voice  import audio_processor 
-from voice_commerce.core.tools import tool_dispatcher
+from voice_commerce.core.tools import tool_dispatcher, cart_tools
 from voice_commerce.core.actions.action_dispatcher import ActionDispatcher
 
 log = structlog.get_logger(__name__)
@@ -75,8 +75,23 @@ class VoiceWebSocketHandler:
         self._input_mode: str = "text"
         self._user_started_interaction = False
         self._startup_greeting_sent = False
+        self._startup_greeting_task: asyncio.Task[None] | None = None
         self.action_dispatcher = ActionDispatcher()
         log.info("voice_handler_created", session_id=self.session_id)
+
+    async def _wait_for_gemini_connected(self, gemini: GeminiLiveHandler, timeout_s: float = 2.5) -> bool:
+        """
+        Wait briefly until Gemini is connected for this handler instance.
+        Prevents proactive greeting race conditions at startup/shutdown edges.
+        """
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._gemini is not gemini:
+                return False
+            if gemini.is_connected:
+                return True
+            await asyncio.sleep(0.05)
+        return gemini.is_connected and self._gemini is gemini
 
 
     async def handle(self, websocket: WebSocket) -> None:
@@ -109,16 +124,39 @@ class VoiceWebSocketHandler:
                 # ── 2.1 Proactive Greeting (Only on first connection) ──────────
                 if not self._resumption_handle and len(self._transcript) == 0:
                     async def delayed_greeting():
-                        await asyncio.sleep(1.5) 
-                        if self._user_started_interaction:
-                            log.info("startup_greeting_skipped_user_already_active", session_id=self.session_id)
-                            return
-                        if self._startup_greeting_sent:
-                            return
-                        self._startup_greeting_sent = True
-                        log.info("triggering_proactive_greeting", session_id=self.session_id)
-                        await gemini.send_text("--- SYSTEM: The user just connected to the store. Greet them warmly in one short sentence and ask what they are looking for today. ---")
-                    asyncio.create_task(delayed_greeting())
+                        try:
+                            await asyncio.sleep(1.5)
+
+                            if self._user_started_interaction:
+                                log.info("startup_greeting_skipped_user_already_active", session_id=self.session_id)
+                                return
+                            if self._startup_greeting_sent:
+                                return
+
+                            ready = await self._wait_for_gemini_connected(gemini, timeout_s=2.5)
+                            if not ready:
+                                log.info("startup_greeting_skipped_not_connected", session_id=self.session_id)
+                                return
+
+                            self._startup_greeting_sent = True
+                            log.info("triggering_proactive_greeting", session_id=self.session_id)
+                            await gemini.send_text(
+                                "--- SYSTEM: The user just connected to the store. "
+                                "Greet them warmly in one short sentence and ask what they are looking for today. ---"
+                            )
+                        except asyncio.CancelledError:
+                            log.debug("startup_greeting_cancelled", session_id=self.session_id)
+                            raise
+                        except RuntimeError as exc:
+                            # Session may close between scheduling and send.
+                            log.info("startup_greeting_skipped_runtime", session_id=self.session_id, error=str(exc))
+                        except Exception as exc:
+                            log.warning("startup_greeting_error", session_id=self.session_id, error=str(exc), exc_info=True)
+
+                    self._startup_greeting_task = asyncio.create_task(
+                        delayed_greeting(),
+                        name=f"startup_greeting:{self.session_id}",
+                    )
 
                 # # ── 2.2 Session Rotation (Auto-disconnect after 9 minutes of silence) ──────────
                 # async def _session_timer():
@@ -152,6 +190,13 @@ class VoiceWebSocketHandler:
                     pass  # WebSocket is already gone
 
         finally:
+            if self._startup_greeting_task is not None and not self._startup_greeting_task.done():
+                self._startup_greeting_task.cancel()
+                try:
+                    await self._startup_greeting_task
+                except asyncio.CancelledError:
+                    pass
+            self._startup_greeting_task = None
             self._gemini = None
             log.info("ws_handler_finished", session_id=self.session_id,total_turns=len(self._transcript))
 
@@ -214,7 +259,29 @@ class VoiceWebSocketHandler:
                 # ── 2.1 HANDLE CONTEXT UPDATES (Hidden from Chat) ─────────────
                 try:
                     parsed = json.loads(raw_text)
+                    if isinstance(parsed, dict) and parsed.get("type") == "cart_sync":
+                        page = parsed.get("page", {})
+                        cart_items = parsed.get("cart_items", [])
+                        cart_tools.sync_cart_from_browser(self.session_id, cart_items)
+
+                        await gemini.inject_live_context(
+                            page=page,
+                            products=parsed.get("products", []),
+                        )
+
+                        if parsed.get("announce_to_ai") and parsed.get("product_id"):
+                            await gemini.send_text(
+                                "--- SYSTEM: The user added an item to the cart using the page UI. "
+                                f"Product ID {parsed.get('product_id')} is already in the cart. "
+                                "Briefly confirm it in one short sentence. Do not call add_to_cart. "
+                                "Do not ask whether they want to add it. ---"
+                            )
+                        continue
+
                     if isinstance(parsed, dict) and parsed.get("type") == "context_update":
+                        page = parsed.get("page", {})
+                        if "cart_items" in page:
+                            cart_tools.sync_cart_from_browser(self.session_id, page.get("cart_items", []))
                         log.info("context_update_received", session_id=self.session_id , filters=parsed.get("page", {}).get("active_filters", []) , items=len(parsed.get("products", [])))
                         log.info("context_update_received", parsed=parsed)
                         log.info("context_update_received", page=parsed.get("page", {}), products=parsed.get("products", []))

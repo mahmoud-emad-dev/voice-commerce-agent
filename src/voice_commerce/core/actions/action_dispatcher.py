@@ -172,7 +172,6 @@ class ActionDispatcher:
         if product_id:
             actions.append(highlight(product_id=product_id, scroll=False))
         
-        actions.append(open_cart())
         return actions
 
     

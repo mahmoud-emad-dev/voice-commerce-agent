@@ -215,7 +215,7 @@ class RagService:
             "rag_category_index_build_complete",
             category_count=len(summary),
             grouped_bucket_count=len(grouped),
-            top_categories=sorted(summary.keys())[:] if summary else [],
+            # top_categories=sorted(summary.keys())[:] if summary else [],
         )
         return summary, grouped
 
