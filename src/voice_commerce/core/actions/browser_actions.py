@@ -23,12 +23,17 @@ class  _ActionBase(BaseModel):
 class HighlightProduct(_ActionBase):
     """
     Draw a visual ring around a product card on the store page.
-    The browser JS looks for  [data-product-id="<product_id>"]  and
-    adds a CSS class that pulses with a blue border for 3 seconds.
+    delay_ms  : stagger offset so results appear one-by-one
+    intensity : 'primary' = bright pulse + lift (first result)
+                'secondary' = soft glow (results 2-4, and transcript mentions)
+    auto_fade_ms: total ms before highlight fully fades away
     """
     action: Literal["highlight_product"] = "highlight_product"
     product_id: int
     scroll_to: bool = True
+    delay_ms: int = 0
+    intensity: Literal["primary", "secondary"] = "primary"
+    auto_fade_ms: int = 8000
     
 class ScrollToProduct(_ActionBase):
     """
@@ -142,8 +147,21 @@ Example:
 
 # Convenience helpers used by action_dispatcher --------------------------------
 
-def highlight(product_id: int, *, scroll: bool = True) -> HighlightProduct:
-    return HighlightProduct(product_id=product_id, scroll_to=scroll)
+def highlight(
+    product_id: int,
+    *,
+    scroll: bool = True,
+    delay_ms: int = 0,
+    intensity: Literal["primary", "secondary"] = "primary",
+    auto_fade_ms: int = 8000,
+) -> HighlightProduct:
+    return HighlightProduct(
+        product_id=product_id,
+        scroll_to=scroll,
+        delay_ms=delay_ms,
+        intensity=intensity,
+        auto_fade_ms=auto_fade_ms,
+    )
  
 def notify(message: str, level: NotificationLevel = "info", duration_ms: int = 3000) -> ShowNotification:
     return ShowNotification(message=message, level=level, duration_ms=duration_ms)  

@@ -234,9 +234,9 @@
         '  to{opacity:1;transform:translateY(0)}',
         '}',
         '@keyframes vc-highlight-ring {',
-        '  0%{outline-color:rgba(37,99,235,0.9);outline-offset:2px}',
-        '  50%{outline-color:rgba(37,99,235,0.5);outline-offset:5px}',
-        '  100%{outline-color:rgba(37,99,235,0);outline-offset:8px}',
+        '  0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.55); transform: scale(1); }',
+        '  40%  { box-shadow: 0 0 0 10px rgba(99,102,241,0.18); transform: scale(1.018); }',
+        '  100% { box-shadow: 0 0 0 6px rgba(99,102,241,0.13), 0 8px 25px rgba(99,102,241,0.22); transform: scale(1.015); }',
         '}',
         '@keyframes vc-typing {',
         '  0%,80%,100%{transform:scale(0.8);opacity:0.4}',
@@ -570,74 +570,53 @@
         // '.vc-toast.vc-warning { border-left-color: var(--vc-warning) !important; }',
         // '.vc-toast.vc-in { opacity: 1 !important; transform: translateX(0) !important; }',
         /* ── Product highlight ring (applied to host page elements) ──────────── */
-        // '.vc-highlighted{',
-        // '  outline:3px solid rgba(37,99,235,0.85) !important;',
-        // '  outline-offset:3px !important;',
-        // '  box-shadow:0 0 0 6px rgba(37,99,235,0.12) !important;',
-        // '  transition:outline 0.25s ease,box-shadow 0.25s ease !important;',
-        // '  scroll-margin-top:100px;',
-        // '  border-radius:4px;',
-        // '}',
 
-        '.vc-highlighted{',
-        '  position: relative;',
-        '  z-index: 100;',
-        '  outline: 4px solid var(--vc-accent) !important;',
-        '  outline-offset: 4px !important;',
-        '  box-shadow: 0 0 30px rgba(99, 102, 241, 0.4) !important;',
-        '  opacity: 1;',
-        '  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;',
+        '.vc-highlight-primary {',
+        '  position: relative !important;',
+        '  z-index: 100 !important;',
+        '  outline: 3px solid var(--vc-accent) !important;',
+        '  outline-offset: 3px !important;',
+        '  box-shadow: 0 0 0 6px rgba(99,102,241,0.13), 0 8px 25px rgba(99,102,241,0.22) !important;',
+        '  transform: translateY(-3px) scale(1.015) !important;',
+        '  transition: outline 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease !important;',
         '  scroll-margin-top: 120px;',
         '  border-radius: var(--vc-radius-sm);',
-        '  transform: translateY(-4px);', /* Slight lift effect */
+        '  animation: vc-highlight-ring 0.45s ease-out;',
         '}',
-        '.vc-highlight-fade{',
-        '  outline-color: rgba(99, 102, 241, 0) !important;',
-        '  box-shadow: 0 0 0 rgba(99, 102, 241, 0) !important;',
-        '  transform: translateY(0);',
-        '  opacity: 0.6;',
-        '  transition: all 0.3s ease !important;',
+        '.vc-highlight-secondary {',
+        '  position: relative !important;',
+        '  z-index: 50 !important;',
+        '  outline: 1.5px solid rgba(99,102,241,0.4) !important;',
+        '  outline-offset: 2px !important;',
+        '  box-shadow: 0 0 0 4px rgba(99,102,241,0.06), 0 4px 12px rgba(99,102,241,0.1) !important;',
+        '  transition: outline 0.3s ease, box-shadow 0.3s ease !important;',
+        '  border-radius: var(--vc-radius-sm);',
         '}',
-        '.vc-highlight-muted{',
-        '  filter: blur(1px) saturate(0.7);',
-        '  opacity: 0.45;',
-        '  transition: filter 0.3s ease, opacity 0.3s ease !important;',
+        '.vc-highlight-fade {',
+        '  outline: 1px solid rgba(99,102,241,0.1) !important;',
+        '  box-shadow: none !important;',
+        '  transform: none !important;',
+        '  transition: all 0.55s ease !important;',
         '}',
-
-        // /* --- Product Highlights (Sequential Guided Tour) --- */
-        // '.vc-highlight-active {',
-        // '  position: relative !important;',
-        // '  z-index: 100 !important;',
-        // '  outline: 4px solid #3b82f6 !important;', /* Premium Electric Blue */
-        // '  outline-offset: 4px !important;',
-        // '  transform: translateY(-4px) scale(1.02) !important;',
-        // '  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;',
-        // '  animation: vc-pulse-ring 1.5s infinite !important;',
-        // '}',
-        // '.vc-highlight-soft {',
-        // '  position: relative !important;',
-        // '  outline: 2px solid rgba(59, 130, 246, 0.4) !important;',
-        // '  outline-offset: 2px !important;',
-        // '  box-shadow: 0 0 15px rgba(59, 130, 246, 0.1) !important;',
-        // '  transition: all 0.5s ease !important;',
-        // '}',
-        // '.vc-highlight-badge {',
-        // '  position: absolute !important;',
-        // '  top: -12px !important;',
-        // '  left: -12px !important;',
-        // '  background: #3b82f6 !important;', /* Premium Electric Blue */
-        // '  color: #fff !important;',
-        // '  font-weight: 800 !important;',
-        // '  font-size: 13px !important;',
-        // '  padding: 4px 10px !important;',
-        // '  border-radius: 20px !important;',
-        // '  box-shadow: 0 4px 10px rgba(0,0,0,0.3) !important;',
-        // '  z-index: 101 !important;',
-        // '  pointer-events: none !important;',
-        // '  animation: vc-bounce-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;',
-        // '}',
-        // '@keyframes vc-bounce-in {',
-        // '  0% { transform: scale(0); opacity: 0; }',
+        '.vc-highlight-meta {',
+        '  position: absolute !important;',
+        '  top: -12px !important;',
+        '  left: -10px !important;',
+        '  background: var(--vc-accent-dark) !important;',
+        '  color: #fff !important;',
+        '  border-radius: 999px !important;',
+        '  font-size: 11px !important;',
+        '  font-weight: 700 !important;',
+        '  line-height: 1 !important;',
+        '  padding: 5px 8px !important;',
+        '  box-shadow: 0 4px 10px rgba(0,0,0,0.28) !important;',
+        '  pointer-events: none !important;',
+        '  z-index: 101 !important;',
+        '  letter-spacing: 0.01em;',
+        '}',
+        '.vc-highlight-meta.vc-highlight-meta-soft {',
+        '  opacity: 0.75;',
+        '}',
         // '  100% { transform: scale(1); opacity: 1; }',
         // '}',
         // '@keyframes vc-pulse-ring {',
@@ -1693,7 +1672,13 @@
         console.log('🔴 [DEBUG 2] Action type is:', msg.action);
         switch (msg.action) {
             case 'highlight_product':
-                _doHighlightProduct(msg.product_id, msg.scroll !== false);
+                _doHighlightProduct(
+                    msg.product_id,
+                    msg.scroll_to !== false,
+                    msg.delay_ms || 0,
+                    msg.intensity || 'primary',
+                    msg.auto_fade_ms || 8000
+                );
                 break;
             case 'scroll_to_product':
                 _doScrollToProduct(msg.product_id);
@@ -1720,7 +1705,7 @@
                 if (_modalDelay > 0) {
                     var _fadeStart = Math.max(0, _modalDelay - _fadeMs);
                     setTimeout(function () {
-                        document.querySelectorAll('.vc-highlighted').forEach(function (el) {
+                        document.querySelectorAll('.vc-highlight-primary, .vc-highlight-secondary, .vc-highlighted').forEach(function (el) {
                             el.classList.add('vc-highlight-fade');
                         });
                     }, _fadeStart);
@@ -1756,50 +1741,89 @@
     }
 
     /* ── highlight_product ──────────────────────────────────────────────────── */
-    function _clearProductFocusState() {
-        document.querySelectorAll('.vc-highlight-muted').forEach(function (el) {
-            el.classList.remove('vc-highlight-muted');
-        });
+    var _vcPendingHighlightTimers = [];
+    var _vcHighlightSequenceStart = 0;
+
+    function _clearProductFocusState() {}
+
+    function _removeHighlightMeta(el) {
+        if (!el || !el._vcHighlightMeta) return;
+        try {
+            el._vcHighlightMeta.remove();
+        } catch (_) {}
+        el._vcHighlightMeta = null;
     }
 
-    function _focusProductBackdrop(targetEl) {
-        var products = document.querySelectorAll('[data-product_id], [data-product-id], li.product, article.product');
-        if (!products || !products.length) return;
+    function _setHighlightMeta(el, order, elapsedMs, intensity) {
+        _removeHighlightMeta(el);
+        if (!order) return;
 
-        products.forEach(function (el) {
-            if (el === targetEl) {
-                el.classList.remove('vc-highlight-muted');
-                return;
-            }
-            el.classList.add('vc-highlight-muted');
-        });
+        var badge = document.createElement('span');
+        badge.className = 'vc-highlight-meta' + (intensity === 'secondary' ? ' vc-highlight-meta-soft' : '');
+        badge.setAttribute('aria-hidden', 'true');
+        badge.textContent = '#' + order + ' \u2022 +' + (Math.max(0, elapsedMs) / 1000).toFixed(2) + 's';
+        el.appendChild(badge);
+        el._vcHighlightMeta = badge;
     }
 
-    function _doHighlightProduct(productId, scroll) {
-        var el = _store.findProduct(productId);
+    function _clearHighlightTimers(el) {
         if (!el) return;
+        if (el._vcPrimaryTimer) { clearTimeout(el._vcPrimaryTimer); el._vcPrimaryTimer = null; }
+        if (el._vcFadeTimer) { clearTimeout(el._vcFadeTimer); el._vcFadeTimer = null; }
+        if (el._vcRemoveTimer) { clearTimeout(el._vcRemoveTimer); el._vcRemoveTimer = null; }
+    }
 
-        _doCloseCart();
-        el.classList.remove('vc-highlight-fade');
-        _focusProductBackdrop(el);
+    function _doHighlightProduct(productId, scroll, delayMs, intensity, autoFadeMs) {
+        delayMs = delayMs || 0;
+        intensity = intensity || 'primary';
+        autoFadeMs = autoFadeMs || 8000;
 
-        // Only scroll if no other product is currently highlighted (prevents jumping around)
-        var alreadyHighlighting = document.querySelector('.vc-highlighted');
-        if (scroll && !alreadyHighlighting) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (!_vcHighlightSequenceStart || delayMs === 0) {
+            _vcHighlightSequenceStart = Date.now();
         }
 
-        el.classList.add('vc-highlighted');
+        var activateTimer = setTimeout(function () {
+            var idx = _vcPendingHighlightTimers.indexOf(activateTimer);
+            if (idx >= 0) _vcPendingHighlightTimers.splice(idx, 1);
 
-        clearTimeout(el._vcHighlightTimer);
-        el._vcHighlightTimer = setTimeout(function () {
-            el.classList.remove('vc-highlighted');
-            el.classList.remove('vc-highlight-fade');
-            el.style.transform = ''; // reset lift
-            if (!document.querySelector('.vc-highlighted')) {
-                _clearProductFocusState();
+            var el = _store.findProduct(productId);
+            if (!el) return;
+
+            _doCloseCart();
+            _clearHighlightTimers(el);
+
+            el.classList.remove('vc-highlight-primary', 'vc-highlight-secondary', 'vc-highlight-fade', 'vc-highlighted');
+            var cls = intensity === 'primary' ? 'vc-highlight-primary' : 'vc-highlight-secondary';
+            el.classList.add(cls);
+
+            var order = Math.floor((Math.max(0, delayMs) / 350) + 0.0001) + 1;
+            var elapsedMs = _vcHighlightSequenceStart ? (Date.now() - _vcHighlightSequenceStart) : delayMs;
+            _setHighlightMeta(el, order, elapsedMs, intensity);
+
+            if (scroll && intensity === 'primary') {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-        }, CONFIG.highlightDuration);
+
+            if (intensity === 'primary') {
+                el._vcPrimaryTimer = setTimeout(function () {
+                    el.classList.remove('vc-highlight-primary');
+                    el.classList.add('vc-highlight-secondary');
+                    if (el._vcHighlightMeta) el._vcHighlightMeta.classList.add('vc-highlight-meta-soft');
+                }, 2000);
+            }
+
+            el._vcFadeTimer = setTimeout(function () {
+                el.classList.add('vc-highlight-fade');
+            }, Math.max(0, autoFadeMs - 600));
+
+            el._vcRemoveTimer = setTimeout(function () {
+                el.classList.remove('vc-highlight-primary', 'vc-highlight-secondary', 'vc-highlight-fade', 'vc-highlighted');
+                el.style.transform = '';
+                _removeHighlightMeta(el);
+            }, autoFadeMs);
+        }, delayMs);
+
+        _vcPendingHighlightTimers.push(activateTimer);
     }
     /* --- Highlight Queue State --- */
     // var _highlightQueue = [];
@@ -1977,9 +2001,11 @@
         if (!overlay || !box) return;
 
         _doCloseCart();
-        document.querySelectorAll('.vc-highlighted').forEach(function (el) {
-            el.classList.remove('vc-highlighted');
-            el.classList.remove('vc-highlight-fade');
+        document.querySelectorAll('.vc-highlight-primary, .vc-highlight-secondary, .vc-highlight-fade, .vc-highlighted').forEach(function (el) {
+            _clearHighlightTimers(el);
+            el.classList.remove('vc-highlight-primary', 'vc-highlight-secondary', 'vc-highlight-fade', 'vc-highlighted');
+            el.style.transform = '';
+            _removeHighlightMeta(el);
         });
         _clearProductFocusState();
 
@@ -2049,10 +2075,19 @@
 
     /* ── clear_highlights ────────────────────────────────────────────────────── */
     function _doClearHighlights() {
-        document.querySelectorAll('.vc-highlighted').forEach(function (el) {
-            el.classList.remove('vc-highlighted');
-            el.classList.remove('vc-highlight-fade');
+        _vcPendingHighlightTimers.forEach(function (timerId) {
+            clearTimeout(timerId);
         });
+        _vcPendingHighlightTimers = [];
+
+        var selector = '.vc-highlight-primary, .vc-highlight-secondary, .vc-highlight-fade, .vc-highlighted';
+        document.querySelectorAll(selector).forEach(function (el) {
+            _clearHighlightTimers(el);
+            el.classList.remove('vc-highlight-primary', 'vc-highlight-secondary', 'vc-highlight-fade', 'vc-highlighted');
+            el.style.transform = '';
+            _removeHighlightMeta(el);
+        });
+        _vcHighlightSequenceStart = 0;
         _clearProductFocusState();
     }
 
