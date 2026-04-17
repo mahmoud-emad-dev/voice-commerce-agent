@@ -20,6 +20,14 @@ from voice_commerce.core.actions.browser_actions import (
 
 log = structlog.get_logger(__name__)
 
+
+def _toast_line(text: Any, max_chars: int = 72) -> str:
+    """Normalize toast copy to a single short line."""
+    one_line = " ".join(str(text).split())
+    if len(one_line) <= max_chars:
+        return one_line
+    return one_line[: max_chars - 1] + "…"
+
 class ActionDispatcher:
     """
     Stateless dispatcher — call dispatch() after every tool invocation.
@@ -40,7 +48,7 @@ class ActionDispatcher:
         # 1. Generic Error Handling (Intercepts any ToolResponse.error())
         if tool_response.status == "error":
             error_msg = tool_response.ai_text
-            return [notify(error_msg, "error")]
+            return [notify(_toast_line(error_msg), "error")]
         
         # 2. Dynamic Routing (e.g., "_on_add_to_cart")
         method_name = f"_on_{tool_name}"
@@ -73,7 +81,7 @@ class ActionDispatcher:
         """
         products : list[dict[str, Any]] = tool_result.get("products", [])
         if not products:
-            return [notify("No products found. Try different keywords.", "info")]
+            return [notify("No results. Try different words.", "info", 2000)]
         
         # Always clear previous highlights first
         actions: list[BrowserAction] = [ClearHighlights()]
@@ -93,12 +101,12 @@ class ActionDispatcher:
         """
         product : dict[str, Any] | None = tool_result.get("product")
         if not product:
-            return [notify("No product found.", "error")]
+            return [notify(_toast_line("No product found."), "error")]
         
         pid : int | None = product.get("id")
         product_name : str  = product.get("name" , "Product"  )
         if not pid:
-            return [notify("No product ID found.", "error")]
+            return [notify(_toast_line("No product ID found."), "error")]
         
         actions: list[BrowserAction] = [ClearHighlights()]
         actions.append(ShowProductModal(product_id=pid , product_name=product_name))
@@ -124,7 +132,7 @@ class ActionDispatcher:
             quantity = 1
 
         actions: list[BrowserAction] = [
-            notify(f"✓ {product_name} added", "success", 2000),
+            notify(_toast_line(f"✓ {product_name} added"), "success", 2000),
             update_badge(cart_count if cart_count is not None else 0),
         ]
         if product_id:
@@ -143,7 +151,7 @@ class ActionDispatcher:
         
         actions: list[BrowserAction] = [
             update_badge(cart_count if cart_count is not None else 0),
-            notify(f"Item {product_name} removed from cart", "info"),
+            notify(_toast_line(f"✕ {product_name} removed"), "info", 1500),
         ]
 
         return actions

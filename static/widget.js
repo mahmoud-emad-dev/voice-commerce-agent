@@ -2361,13 +2361,20 @@
         warning: '⚠',
         info: 'ℹ',
     };
+    var TOAST_DURATIONS = { success: 2500, info: 1500, warning: 3500, error: 5000 };
+    var TOAST_MAX = 2;   /* max toasts visible at once */
 
     function _showToast(message, level, duration) {
         level = level || 'info';
-        duration = duration || CONFIG.toastDuration;
+        var ms = duration || TOAST_DURATIONS[level] || 2000;
 
         var container = document.getElementById('vc-toasts');
         if (!container) return;
+
+        /* Enforce max stack — remove oldest if over limit */
+        while (container.children.length >= TOAST_MAX) {
+            container.removeChild(container.firstChild);
+        }
 
         var toast = document.createElement('div');
         toast.className = 'vc-toast vc-' + level;
@@ -2391,7 +2398,7 @@
             setTimeout(function () {
                 if (toast.parentNode) toast.parentNode.removeChild(toast);
             }, 350);
-        }, duration);
+        }, ms);
     }
 
     /* ══════════════════════════════════════════════════════════════════════════
