@@ -95,8 +95,8 @@ class ActionDispatcher:
         # Always wipe previous highlights at the start of a new search
         actions: list[BrowserAction] = [ClearHighlights()]
 
-        STAGGER_MS = 350
-        FADE_MS = 8000
+        STAGGER_MS = 1400
+        FADE_MS = 12000
 
         for i, product in enumerate(products[:4]):
             pid : int | None = product.get("id")
@@ -104,7 +104,7 @@ class ActionDispatcher:
                 actions.append(
                     highlight(
                         product_id=pid,
-                        scroll=(i == 0),
+                        scroll=True,
                         delay_ms=i * STAGGER_MS,
                         intensity="primary" if i == 0 else "secondary",
                         auto_fade_ms=FADE_MS,
