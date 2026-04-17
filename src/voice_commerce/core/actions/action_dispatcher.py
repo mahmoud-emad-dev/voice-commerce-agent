@@ -13,6 +13,7 @@ from voice_commerce.core.actions.browser_actions import (
     highlight,
     notify,
     update_badge,
+    add_to_real_cart,
     open_cart,
 
 )
@@ -115,12 +116,19 @@ class ActionDispatcher:
         """
         product_id : int | None = tool_args.get("product_id")
         product_name : str | None = tool_args.get("product_name" , "Item")
-        cart_count : int | None = tool_result.get("cart_count" ,1)
+        cart_count : int | None = tool_result.get("cart_count" ,0)
+        raw_quantity = tool_args.get("quantity", 1)
+        try:
+            quantity = max(1, int(raw_quantity))
+        except (TypeError, ValueError):
+            quantity = 1
 
         actions: list[BrowserAction] = [
-            notify(f"✓ {product_name} added to cart", "success"),
+            notify(f"✓ {product_name} added", "success", 2000),
             update_badge(cart_count if cart_count is not None else 0),
         ]
+        if product_id:
+            actions.append(add_to_real_cart(product_id=product_id, quantity=quantity))
         if product_id:
             actions.append(highlight(product_id=product_id, scroll=False))
         

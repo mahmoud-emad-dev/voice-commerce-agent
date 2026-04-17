@@ -1829,7 +1829,7 @@
   </style>
 </head>
 
-<body class="woocommerce woocommerce-page">
+<body class="woocommerce woocommerce-page" data-vc-demo="true">
 
   <!-- Toast container -->
   <div id="toast-container"></div>
@@ -2460,6 +2460,16 @@
       setTimeout(() => document.getElementById('cart-count-header')?.classList.remove('bump'), 200);
     }
 
+    function handleVoiceAddToCart(detail) {
+      const id = Number(detail?.id);
+      const qty = Math.max(1, Number(detail?.qty || 1));
+      const product = PRODUCTS.find(p => p.id === id);
+      if (!product) return;
+
+      addToCart(id, qty, product.colors[0] || '', product.sizes[0] || '');
+      renderCartDrawer();
+    }
+
     function addToCart(id, qty, color, size) {
       const product = PRODUCTS.find(p => p.id === id);
       if (!product) return;
@@ -2817,6 +2827,12 @@
     /* ═══════════════ 10. INIT ══════════════════════════════════════════ */
 
     (function init() {
+      window.__VC_EMBED_DEMO__ = true;
+      window.vcAddToCart = handleVoiceAddToCart;
+      window.addEventListener('vc:addToCart', function (event) {
+        handleVoiceAddToCart(event.detail || {});
+      });
+
       renderHero();
       renderCatPills();
       renderSidebarCats();
