@@ -87,6 +87,8 @@ class Product(BaseModel):
     sku: str = "" 
     weight: str = "" 
     permalink: str = ""
+    thumbnail: str = ""
+    images: list[dict] = Field(default_factory=list)
     # Full URL to the product page on the WooCommerce store.
     # Used in browser actions (Phase 8) to link customers to the product page.
 
@@ -336,6 +338,11 @@ class Product(BaseModel):
             sku=data.get("sku", ""),
             weight=data.get("weight", ""),
             permalink=data.get("permalink", ""),
+            # thumbnail=(
+            #     data.get("images", [{}])[0].get("src", "")
+            #     if data.get("images") and isinstance(data.get("images")[0], dict)
+            #     else ""
+            # ),
         )
     
 

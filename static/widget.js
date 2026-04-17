@@ -645,33 +645,37 @@
         '.vc-modal-box{',
         '  background:var(--vc-surface);',
         '  border-radius:var(--vc-radius);',
-        '  padding:24px;',
+        '  padding:18px;',
         '  max-width:400px;width:100%;',
         '  box-shadow:var(--vc-shadow-lg);',
         '  font-family:var(--vc-font);',
         '  animation:vc-slide-up 0.22s ease;',
         '}',
-        '.vc-modal-title{font-size:16px;font-weight:600;color:var(--vc-text);margin-bottom:8px;}',
-        '.vc-modal-price{font-size:18px;font-weight:700;color:var(--vc-accent);margin-bottom:8px;}',
-        '.vc-modal-desc{font-size:13px;color:var(--vc-text2);line-height:1.6;margin-bottom:16px;}',
+        '.vc-modal-inner{display:flex;flex-direction:column;gap:12px;}',
+        '.vc-modal-img-wrap{background:var(--vc-surface3);border-radius:var(--vc-radius-sm);overflow:hidden;}',
+        '.vc-modal-content{display:flex;flex-direction:column;gap:8px;}',
+        '.vc-modal-category{display:inline-block;align-self:flex-start;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;background:var(--vc-surface3);color:var(--vc-text2);}',
+        '.vc-modal-title{font-size:21px;font-weight:700;line-height:1.25;color:var(--vc-text);margin:0;}',
+        '.vc-modal-price{font-size:20px;font-weight:700;color:var(--vc-accent);margin:0;}',
+        '.vc-modal-desc{font-size:13px;color:var(--vc-text2);line-height:1.55;margin:0 0 8px 0;}',
         '.vc-modal-img{',
         '  width:100%;max-height:200px;object-fit:cover;',
-        '  border-radius:var(--vc-radius-sm);margin-bottom:12px;',
-        '  background:var(--vc-surface3);',
-        '}',
-        '.vc-modal-actions{display:flex;gap:8px;flex-wrap:wrap;}',
-        '.vc-modal-btn{',
-        '  flex:1;padding:9px 14px;',
         '  border-radius:var(--vc-radius-sm);',
-        '  border:none;cursor:pointer;',
+        '  display:block;',
+        '}',
+        '.vc-modal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}',
+        '.vc-btn{',
+        '  flex:1;padding:9px 12px;',
+        '  border-radius:var(--vc-radius-sm);',
+        '  border:1px solid transparent;cursor:pointer;',
         '  font-size:13px;font-weight:500;',
         '  font-family:var(--vc-font);',
-        '  transition:background 0.15s ease;',
+        '  transition:background 0.15s ease,border-color 0.15s ease,color 0.15s ease;',
         '}',
-        '.vc-modal-btn-primary{background:var(--vc-accent);color:#fff;}',
-        '.vc-modal-btn-primary:hover{background:var(--vc-accent-dark);}',
-        '.vc-modal-btn-secondary{background:var(--vc-surface3);color:var(--vc-text2);}',
-        '.vc-modal-btn-secondary:hover{background:var(--vc-border);}',
+        '.vc-btn-primary{background:var(--vc-accent);color:#fff;}',
+        '.vc-btn-primary:hover{background:var(--vc-accent-dark);}',
+        '.vc-btn-ghost{background:var(--vc-surface2);color:var(--vc-text2);border-color:var(--vc-border);}',
+        '.vc-btn-ghost:hover{background:var(--vc-surface3);}',
 
         /* ── Product search results panel (shown inside transcript) ────────────  */
         '.vc-products-panel{',
@@ -1638,7 +1642,14 @@
                 _doCloseCart();
                 break;
             case 'show_product_modal':
-                _doShowProductModal(msg.product_id, msg.product_name, msg.product_data);
+                var delayMs = Number(msg.delay_ms || 0);
+                if (delayMs > 0) {
+                    setTimeout(function () {
+                        _doShowProductModal(msg.product_id, msg.product_name, msg.product_data);
+                    }, delayMs);
+                } else {
+                    _doShowProductModal(msg.product_id, msg.product_name, msg.product_data);
+                }
                 break;
             case 'set_search_query':
                 _doSetSearchQuery(msg.query, msg.submit);
@@ -1847,53 +1858,53 @@
         var box = document.getElementById('vc-modal-box');
         if (!overlay || !box) return;
 
-        /* Find product on page for extra info */
-        var pageEl = _store.findProduct(productId);
-        var img = '';
-        if (pageEl) {
-            var imgEl = pageEl.querySelector('img');
-            if (imgEl) img = imgEl.src;
-        }
-        if (productData && productData.thumbnail) img = productData.thumbnail;
+        var img = (productData && productData.thumbnail) ? productData.thumbnail : '';
+        var price = (productData && productData.price) ? productData.price : '';
+        var desc = (productData && productData.short_desc) ? productData.short_desc : '';
+        var category = (productData && productData.category) ? productData.category : '';
 
-        var price = '';
-        if (productData && productData.price) price = productData.price;
-        else if (pageEl) {
-            var priceEl = pageEl.querySelector('.price, [class*="price"]');
-            if (priceEl) price = priceEl.textContent.trim();
-        }
-
-        var desc = '';
-        if (productData && productData.short_desc) desc = productData.short_desc;
+        var cleanDesc = String(desc || '').replace(/<[^>]*>/g, '').trim();
 
         box.innerHTML = [
-            img ? '<img class="vc-modal-img" src="' + _esc(img) + '" alt="' + _esc(productName || '') + '">' : '',
-            '<div class="vc-modal-title">' + _esc(productName || 'Product #' + productId) + '</div>',
+            '<div class="vc-modal-inner">',
+            img ? '<div class="vc-modal-img-wrap"><img class="vc-modal-img" src="' + _esc(img) + '" alt="' + _esc(productName || '') + '" onerror="this.style.display=\'none\'"></div>' : '',
+            '<div class="vc-modal-content">',
+            category ? '<span class="vc-modal-category">' + _esc(category) + '</span>' : '',
+            '<h2 class="vc-modal-title">' + _esc(productName || 'Product #' + productId) + '</h2>',
             price ? '<div class="vc-modal-price">' + _esc(price) + '</div>' : '',
-            desc ? '<div class="vc-modal-desc">' + _esc(desc) + '</div>' : '',
+            cleanDesc ? '<p class="vc-modal-desc">' + _esc(cleanDesc) + '</p>' : '',
             '<div class="vc-modal-actions">',
-            '  <button class="vc-modal-btn vc-modal-btn-primary" id="vc-modal-add">Add to cart</button>',
-            '  <button class="vc-modal-btn vc-modal-btn-secondary" id="vc-modal-close">Close</button>',
+            '  <button class="vc-btn vc-btn-primary" id="vc-modal-add">Add to Cart</button>',
+            '  <button class="vc-btn vc-btn-ghost" id="vc-modal-view">View on page</button>',
+            '  <button class="vc-btn vc-btn-ghost" id="vc-modal-close">Close</button>',
+            '</div>',
+            '</div>',
             '</div>',
         ].join('');
 
         overlay.classList.add('vc-open');
-
-        /* Close on backdrop click */
-        overlay.onclick = function (e) {
-            if (e.target === overlay) _closeModal();
-        };
+        overlay.onclick = function (e) { if (e.target === overlay) _closeModal(); };
 
         var closeBtn = document.getElementById('vc-modal-close');
         if (closeBtn) closeBtn.onclick = _closeModal;
+
+        var viewBtn = document.getElementById('vc-modal-view');
+        if (viewBtn) {
+            viewBtn.onclick = function () {
+                _closeModal();
+                var el = _store.findProduct(productId);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            };
+        }
 
         var addBtn = document.getElementById('vc-modal-add');
         if (addBtn) {
             addBtn.onclick = function () {
                 _closeModal();
-                /* Ask the AI to add the product via voice command */
+                _doAddToRealCart(productId, 1);
+                _doUpdateCartBadge(STATE.cartCount + 1);
                 _sendText('Add product ' + productId + ' to my cart');
-            }
+            };
         }
     }
 
