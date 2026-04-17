@@ -76,22 +76,40 @@ class ActionDispatcher:
     # ── Tool handlers (These now receive the nested `ui_data` dictionary) ─────
     def _on_search_products(self, tool_args: dict[str, Any], tool_result: dict[str, Any]) -> list[BrowserAction]:
         """
-        After a product search: highlight the top result.
-        If no products found, show an info notification.
+        After a product search: stagger-highlight up to 4 results.
+
+        Stagger logic:
+          - Item 1 (i=0): delay=0ms,    intensity=primary,   scroll=True
+          - Item 2 (i=1): delay=350ms,  intensity=secondary, scroll=False
+          - Item 3 (i=2): delay=700ms,  intensity=secondary, scroll=False
+          - Item 4 (i=3): delay=1050ms, intensity=secondary, scroll=False
+
+        Result: items appear one-by-one like the AI is finding them in order.
+        Primary = bright pulse + lift. Secondary = soft lingering glow.
+        Both fade completely after 8 seconds so the page is clean for next search.
         """
         products : list[dict[str, Any]] = tool_result.get("products", [])
         if not products:
-            return [notify("No results. Try different words.", "info", 2000)]
-        
-        # Always clear previous highlights first
+            return [notify("No products found. Try different keywords.", "info")]
+
+        # Always wipe previous highlights at the start of a new search
         actions: list[BrowserAction] = [ClearHighlights()]
 
-        # Highlight up to the first 4 products
-        for product in products[:4]:
+        STAGGER_MS = 350
+        FADE_MS = 8000
+
+        for i, product in enumerate(products[:4]):
             pid : int | None = product.get("id")
             if pid:
-                # Scroll the page only for the very first item
-                actions.append(highlight(product_id=pid, scroll=(product==products[0])))
+                actions.append(
+                    highlight(
+                        product_id=pid,
+                        scroll=(i == 0),
+                        delay_ms=i * STAGGER_MS,
+                        intensity="primary" if i == 0 else "secondary",
+                        auto_fade_ms=FADE_MS,
+                    )
+                )
 
         return actions
 
