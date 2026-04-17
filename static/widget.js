@@ -1597,6 +1597,7 @@
      *   highlight_product     — blue ring around a product card
      *   scroll_to_product     — smooth scroll to product
      *   update_cart_badge     — update the cart count bubble on FAB
+     *   add_to_real_cart      — add item to platform cart backend (Woo/demo)
      *   show_notification     — toast notification (success/error/info/warning)
      *   open_cart             — open cart drawer/sidebar
      *   close_cart            — close cart drawer
@@ -1622,6 +1623,9 @@
                 break;
             case 'update_cart_badge':
                 _doUpdateCartBadge(msg.count);
+                break;
+            case 'add_to_real_cart':
+                _doAddToRealCart(msg.product_id, msg.quantity);
                 break;
             case 'show_notification':
                 console.log('🔴 [DEBUG 3] Routing to _showToast with message:', msg.message);
@@ -1789,6 +1793,44 @@
         }
     }
 
+    /* ── add_to_real_cart ─────────────────────────────────────────────────── */
+    function _doAddToRealCart(productId, quantity) {
+        var pid = Number(productId);
+        var qty = Number(quantity || 1);
+        if (!pid || !Number.isFinite(pid)) return;
+        if (!qty || !Number.isFinite(qty) || qty < 1) qty = 1;
+
+        /* 1) Universal event path for demo/custom storefronts */
+        window.dispatchEvent(new CustomEvent('vc:addToCart', {
+            detail: { id: pid, qty: qty }
+        }));
+
+        /* 2) Real WooCommerce AJAX path */
+        if (typeof wc_add_to_cart_params !== 'undefined') {
+            var formData = new FormData();
+            formData.append('product_id', pid);
+            formData.append('quantity', qty);
+
+            fetch('/?wc-ajax=add_to_cart', {
+                method: 'POST',
+                body: formData,
+            })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (data && !data.error) {
+                        if (window.jQuery) {
+                            window.jQuery(document.body).trigger('wc_fragment_refresh');
+                        } else {
+                            document.body.dispatchEvent(new CustomEvent('wc_fragment_refresh', { bubbles: true }));
+                        }
+                    }
+                })
+                .catch(function (err) {
+                    console.warn('[VoiceCommerce] WC add_to_cart failed:', err);
+                });
+        }
+    }
+
     /* ── open_cart ──────────────────────────────────────────────────────────── */
     function _doOpenCart() {
         _store.openCart();
@@ -1851,7 +1893,7 @@
                 _closeModal();
                 /* Ask the AI to add the product via voice command */
                 _sendText('Add product ' + productId + ' to my cart');
-            };
+            }
         }
     }
 
@@ -1889,6 +1931,52 @@
      * ══════════════════════════════════════════════════════════════════════════ */
 
     var STORE_ADAPTERS = {
+        /* ── Embed demo adapter ─────────────────────────────────────────────── */
+        embed_demo: {
+            detect: function () {
+                return document.body.getAttribute('data-vc-demo') === 'true' ||
+                    window.__VC_EMBED_DEMO__ === true;
+            },
+
+            findProduct: function (productId) {
+                return (
+                    document.querySelector('[data-product_id="' + productId + '"]') ||
+                    document.querySelector('[data-product-id="' + productId + '"]')
+                );
+            },
+
+            updateCartBadge: function (count) {
+                document.querySelectorAll('.cart-contents-count,#drawer-cart-count,#cart-count-header').forEach(function (el) {
+                    el.textContent = count;
+                });
+            },
+
+            openCart: function () {
+                if (typeof window.openCart === 'function') {
+                    window.openCart();
+                }
+            },
+
+            closeCart: function () {
+                if (typeof window.closeCart === 'function') {
+                    window.closeCart();
+                }
+            },
+
+            setSearchQuery: function (query, submit) {
+                var input = document.querySelector('input[name="s"][type="search"], input.search-field');
+                if (!input) return;
+                input.value = query;
+                input.focus();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                if (submit) {
+                    var form = input.closest('form');
+                    if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                }
+            },
+
+            applyFilter: function () { },
+        },
 
         /* ── WooCommerce adapter ────────────────────────────────────────────── */
         woocommerce: {
@@ -2122,7 +2210,7 @@
      * The active adapter is stored in  _store  and used by all action handlers.
      */
     var _store = (function () {
-        var order = ['woocommerce', 'shopify', 'generic'];
+        var order = ['embed_demo', 'woocommerce', 'shopify', 'generic'];
         for (var i = 0; i < order.length; i++) {
             var adapter = STORE_ADAPTERS[order[i]];
             if (adapter.detect()) {

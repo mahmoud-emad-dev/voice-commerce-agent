@@ -48,6 +48,16 @@ class UpdateCartBadge(_ActionBase):
     action: Literal["update_cart_badge"] = "update_cart_badge"
     count: int         # total items in cart
 
+class AddToRealCart(_ActionBase):
+    """
+    Tell the browser to make the real cart AJAX call.
+    For WooCommerce: POST /?wc-ajax=add_to_cart.
+    For embed_demo.html: dispatches window event 'vc:addToCart'.
+    This is separate from UpdateCartBadge (cosmetic badge count only).
+    """
+    action: Literal["add_to_real_cart"] = "add_to_real_cart"
+    product_id: int
+    quantity: int = 1
 
 class OpenCart(_ActionBase):
     """
@@ -106,6 +116,7 @@ BrowserAction = Annotated[
         HighlightProduct,
         ScrollToProduct,
         UpdateCartBadge,
+        AddToRealCart,
         ShowNotification,
         OpenCart,
         CloseCart,
@@ -136,6 +147,9 @@ def notify(message: str, level: NotificationLevel = "info", duration_ms: int = 3
  
 def update_badge(count: int) -> UpdateCartBadge:
     return UpdateCartBadge(count=count)
+
+def add_to_real_cart(product_id: int, quantity: int = 1) -> AddToRealCart:
+    return AddToRealCart(product_id=product_id, quantity=quantity)
  
 def open_cart() -> OpenCart:
     return OpenCart()
