@@ -113,9 +113,14 @@ class GeminiLiveHandler:
             "gemini_system_prompt_built",
             prompt_chars=len(system_prompt),
             category_summary_lines=len(self._category_summary_text.splitlines()),
-            preview=system_prompt[:],
+            preview=system_prompt[:200],
         )
         return system_prompt
+
+    @property
+    def is_connected(self) -> bool:
+        """True when the live Gemini session is ready to send/receive."""
+        return self._session is not None
          
     # =========================================================================
     # SENDING METHODS (App -> Gemini)
@@ -207,6 +212,19 @@ class GeminiLiveHandler:
 
         if not product_text:
             product_text = "No products currently visible."
+
+        cart_items = page.get("cart_items", [])
+        if cart_items:
+            cart_lines = []
+            for item in cart_items[:10]:
+                qty = item.get("quantity", item.get("qty", 1))
+                name = item.get("name", "Unknown item")
+                cart_lines.append(f"- {qty} x {name}")
+            cart_items_text = "\n".join(cart_lines)
+        elif "cart_items" in page:
+            cart_items_text = "The cart is empty."
+        else:
+            cart_items_text = "Cart contents not available from the current page."
         updated_at = datetime.now().strftime("%H:%M:%S")
         # Construct the silent system injection prompt
         context_msg = (
@@ -214,7 +232,8 @@ class GeminiLiveHandler:
                     "The user's screen has just updated. You now have access to their live view.\n"
                     f"Current URL: {page.get('url', 'Unknown')}\n"
                     f"Active Filters/Categories: {filters_text}\n"
-                    f"Total Items in Cart: {page.get('cart_count', 0)}\n\n"
+                    f"Total Items in Cart: {page.get('cart_count', 0)}\n"
+                    f"CART ITEMS:\n{cart_items_text}\n\n"
                     "VISIBLE PRODUCTS ON SCREEN (Numbered in order):\n"
                     f"{product_text}\n"
                     "CRITICAL RULES:\n"

@@ -2480,20 +2480,31 @@
         STATE.cart[key] = { product, qty, color, size };
       }
       updateCartUI();
+      window.dispatchEvent(new CustomEvent('vc:cartChanged', {
+        detail: { reason: 'add', product_id: id }
+      }));
     }
 
     function removeFromCart(key) {
+      const item = STATE.cart[key];
       delete STATE.cart[key];
       updateCartUI();
       renderCartDrawer();
+      window.dispatchEvent(new CustomEvent('vc:cartChanged', {
+        detail: { reason: 'remove', product_id: item ? item.product.id : null }
+      }));
     }
 
     function changeQty(key, delta) {
       if (!STATE.cart[key]) return;
+      const item = STATE.cart[key];
       STATE.cart[key].qty += delta;
       if (STATE.cart[key].qty <= 0) delete STATE.cart[key];
       updateCartUI();
       renderCartDrawer();
+      window.dispatchEvent(new CustomEvent('vc:cartChanged', {
+        detail: { reason: 'quantity', product_id: item ? item.product.id : null }
+      }));
     }
 
     function updateCartUI() {
@@ -2829,6 +2840,17 @@
     (function init() {
       window.__VC_EMBED_DEMO__ = true;
       window.vcAddToCart = handleVoiceAddToCart;
+      window.vcGetCartSnapshot = function () {
+        return Object.values(STATE.cart).map(function (item) {
+          var price = item.product.sale > 0 ? item.product.sale : item.product.price;
+          return {
+            product_id: item.product.id,
+            name: item.product.name,
+            quantity: item.qty,
+            price: price,
+          };
+        });
+      };
       window.addEventListener('vc:addToCart', function (event) {
         handleVoiceAddToCart(event.detail || {});
       });

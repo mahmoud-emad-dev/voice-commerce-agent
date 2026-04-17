@@ -11,6 +11,7 @@
 
 
 from __future__ import annotations
+from typing import Any
 
 import structlog
 
@@ -32,6 +33,41 @@ def _get_cart(session_id: str) -> Cart:
     if session_id not in _CARTS:
         _CARTS[session_id] = Cart(session_id=session_id)
     return _CARTS[session_id]
+
+
+def sync_cart_from_browser(session_id: str, items: list[dict[str, Any]]) -> Cart:
+    """
+    Replace the shadow cart with the browser's current cart snapshot.
+    The browser cart is the source of truth for UI-originated mutations.
+    """
+    cart = _get_cart(session_id)
+    cart.items.clear()
+
+    for index, raw in enumerate(items):
+        try:
+            product_id = int(raw.get("product_id", raw.get("id", 0)) or 0)
+            quantity = max(0, int(raw.get("quantity", raw.get("qty", 0)) or 0))
+            price = float(raw.get("price", 0) or 0)
+            name = str(raw.get("name", "") or f"Product #{product_id}")
+        except (TypeError, ValueError):
+            continue
+
+        if quantity <= 0:
+            continue
+
+        # Some storefront mini-cart DOMs do not expose numeric product IDs.
+        # Keep a synthetic negative key so totals and live context still stay correct.
+        if product_id <= 0:
+            product_id = -(index + 1)
+
+        cart.items[product_id] = CartItem(
+            product_id=product_id,
+            name=name,
+            price=price,
+            quantity=quantity,
+        )
+
+    return cart
 
 
 # Tools methods
