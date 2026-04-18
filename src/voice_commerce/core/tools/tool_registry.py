@@ -42,16 +42,9 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                             "Only include if the user specifically mentioned a price limit."
                         ),
                     ),
-                    "category": types.Schema(
-                        type=types.Type.STRING,
-                        description=(
-                            "Optional product category to filter by, e.g. 'shoes', "
-                            "'electronics', 'clothing' , any more. Only include if clearly mentioned."
-                        ),
-                    ),
                 },
                 required=["query"],
-            # max_price and category are optional — not in required list
+                # max_price is optional — not in required list
             ),
         )
     ]
