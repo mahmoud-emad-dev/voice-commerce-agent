@@ -15,8 +15,11 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
         types.FunctionDeclaration(
             name="search_products",
             description=(
-                "Search the store's product catalog using natural language. "
-                "Use this only when the user's product intent is clear enough to search. "
+                "Search the store's product catalog using natural language and return actual product matches. "
+                "Use this when the customer wants products, options, recommendations, or more items in a product type. "
+                "This includes requests like 'show me shorts', 'more shorts', 'summer clothing', "
+                "'light jackets', or 'find me something under $50'. "
+                "Use this instead of search_categories when the user wants actual products, not just category names. "
                 "Do not call this for filler, partial, or ambiguous voice utterances such as "
                 "'what about', 'okay', '.', 'yes', or unfinished speech. "
                 "If the request is unclear, ask a short clarification question first."
@@ -53,7 +56,44 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
         )
     ]
 )
-
+SEARCH_CATEGORIES_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="search_categories",
+            description=(
+                "List all product categories available in the store, or get products "
+                "from a specific category. Call this when the user asks to browse "
+                "instead of search by keyword. Examples: 'what categories do you have', "
+                "'what do you sell', 'show me all running gear', 'browse yoga', "
+                "or 'what is in the cycling section'. Returns category names with product "
+                "counts when called with no arguments, or products in that category "
+                "when given a category name. Do not use this for open-ended product finding "
+                "or recommendation requests like 'more shorts' or 'find light summer clothes'; "
+                "use search_products for those."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "category": types.Schema(
+                        type=types.Type.STRING,
+                        description=(
+                            "Optional exact category name to browse, such as 'Running' or 'Yoga'. "
+                            "Omit to list all categories."
+                        ),
+                    ),
+                    "max_price": types.Schema(
+                        type=types.Type.NUMBER,
+                        description="Optional price ceiling when listing products from a category.",
+                    ),
+                    "in_stock_only": types.Schema(
+                        type=types.Type.BOOLEAN,
+                        description="If true, only return products that are currently in stock.",
+                    ),
+                },
+            ),
+        )
+    ]
+)
 
 
 GET_PRODUCT_DETAILS_TOOL = types.Tool(
@@ -179,6 +219,7 @@ REMOVE_FROM_CART_TOOL = types.Tool(
 
 ALL_TOOLS: list[types.Tool] = [
     SEARCH_PRODUCTS_TOOL,
+    SEARCH_CATEGORIES_TOOL,
     GET_PRODUCT_DETAILS_TOOL,
     ADD_TO_CART_TOOL,
     SHOW_CART_TOOL,
