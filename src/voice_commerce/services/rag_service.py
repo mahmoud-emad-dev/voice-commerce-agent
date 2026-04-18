@@ -22,7 +22,6 @@ SINGLETON PATTERN:
 
 from __future__ import annotations
 from typing import Any, TypedDict, TypeAlias
-import re
 import time 
 from collections import Counter
 
@@ -80,17 +79,6 @@ def get_rag_service() -> "RagService":
     if _service_instance is None:
         _service_instance = RagService()
     return _service_instance
-
-# ── The Rich Text Builder ────────────────────────────────────────────────────
-def _build_rich_text(product: Product) -> str:
-    """
-    Turns a WooCommerce product into a dense semantic paragraph for the AI.
-    """
-    cats = ", ".join(cat.name for cat in product.categories) if product.categories else ""
-    tags = ", ".join(tag.name for tag in product.tags) if product.tags else ""   
-# <p>Great shoe!</p><br><b>Buy now</b>
-    clean_description = re.sub(r"<[^>]+>", " ", product.description).strip()
-    return f"Name: {product.name}. Category: {cats}. Tags: {tags}. Price: ${product.price}. Description: {clean_description}"
 
 # ── Service class ─────────────────────────────────────────────────────────────
 class RagService:
@@ -298,7 +286,7 @@ class RagService:
 
 
         # 2. Build embedding texts
-        texts = [_build_rich_text(p) for p in all_products]
+        texts = [p.to_embedding_text() for p in all_products]
 
         # 3. Embed ALL texts in a background thread (Prevents server freezing!)
         try:

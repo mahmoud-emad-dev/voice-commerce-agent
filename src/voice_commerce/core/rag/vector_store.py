@@ -126,7 +126,7 @@ class VectorStore:
           This is much more efficient than: search everything → filter in Python.
           Qdrant applies the filter before the similarity search, not after.
  
-        score_threshold=0.3:
+        score_threshold=0.45:
           Cosine similarity ranges from -1 (opposite) to 1 (identical).
           0.3 is a loose minimum — below this, the match is too weak to be
           a meaningful result. Prevents returning "winter jacket" for "running
@@ -148,7 +148,7 @@ class VectorStore:
             query=query_vector,
             limit=limit,
             query_filter=query_filter,
-            score_threshold=0.3,
+            score_threshold=0.45,
         ).points
         log.debug("vector_store_search", results=len(results))
         # Re-hydrate the results back into our beautiful Pydantic objects

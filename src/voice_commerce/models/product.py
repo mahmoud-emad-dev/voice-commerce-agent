@@ -8,6 +8,7 @@
 # and by product_tools.py to format data for the Gemini AI.
 # =============================================================================
 from __future__ import annotations
+import html
 import re
 from typing import Any
 
@@ -202,21 +203,21 @@ class Product(BaseModel):
         across all products so the embedding space is comparable.
         Used in Phase 7 (rag_service.py) when indexing products into Qdrant.
         """
+        clean_short_description = html.unescape(self.short_description).strip()
+        clean_description = html.unescape(self.description).strip()
+
         parts = [self.name]
- 
-        if self.short_description:
-            parts.append(self.short_description)
-        if self.description and self.description != self.short_description:
+
+        if clean_short_description:
+            parts.append(f"Summary: {clean_short_description}")
+        if clean_description and clean_description != clean_short_description:
             # Use first 300 chars of full description — enough for semantics
-            parts.append(self.description[:300])
+            parts.append(f"Details: {clean_description[:300]}")
         if self.category_names:
             parts.append(f"Category: {', '.join(self.category_names)}")
         if self.tag_names:
             parts.append(f"Tags: {', '.join(self.tag_names)}")
-        parts.append(f"Price: {self.display_price}")
-        if self.sku:
-            parts.append(f"SKU: {self.sku}")
- 
+
         return ". ".join(parts)
  
     def to_tool_summary(self) -> str:
