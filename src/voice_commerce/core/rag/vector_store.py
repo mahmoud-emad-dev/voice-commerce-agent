@@ -110,7 +110,13 @@ class VectorStore:
 
 
 
-    def search_products(self, query_vector: list[float], limit: int = 5, max_price: float | None = None) -> list[Product]:
+    def search_products(
+        self,
+        query_vector: list[float],
+        limit: int = 5,
+        offset: int = 0,
+        max_price: float | None = None,
+    ) -> list[Product]:
         """
         Find the top-k most similar product vectors to the query vector.
  
@@ -147,6 +153,7 @@ class VectorStore:
             collection_name=self._collection,
             query=query_vector,
             limit=limit,
+            offset=max(0, offset),
             query_filter=query_filter,
             score_threshold=0.45,
         ).points

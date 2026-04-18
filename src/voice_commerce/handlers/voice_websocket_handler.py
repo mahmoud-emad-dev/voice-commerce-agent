@@ -238,7 +238,10 @@ class VoiceWebSocketHandler:
                 
                 log.debug("mic_chunk_received",bytes=len(raw_bytes),session_id=self.session_id) # for test as temp
                 # Stream the raw binary straight into Google's ears
-                await gemini.send_audio_chunk(raw_bytes)
+                if gemini.is_connected:
+                    await gemini.send_audio_chunk(raw_bytes)
+                else:
+                    log.debug("audio_chunk_skipped_gemini_not_connected", session_id=self.session_id)
 
 
             # ── 2. HANDLE TEXT (Chat Box) TEXT FRAME = typed message or control JSON ─────────────
@@ -270,12 +273,13 @@ class VoiceWebSocketHandler:
                         )
 
                         if parsed.get("announce_to_ai") and parsed.get("product_id"):
-                            await gemini.send_text(
-                                "--- SYSTEM: The user added an item to the cart using the page UI. "
-                                f"Product ID {parsed.get('product_id')} is already in the cart. "
-                                "Briefly confirm it in one short sentence. Do not call add_to_cart. "
-                                "Do not ask whether they want to add it. ---"
-                            )
+                            if gemini.is_connected:
+                                await gemini.send_text(
+                                    "--- SYSTEM: The user added an item to the cart using the page UI. "
+                                    f"Product ID {parsed.get('product_id')} is already in the cart. "
+                                    "Briefly confirm it in one short sentence. Do not call add_to_cart. "
+                                    "Do not ask whether they want to add it. ---"
+                                )
                         continue
 
                     if isinstance(parsed, dict) and parsed.get("type") == "context_update":
@@ -309,7 +313,10 @@ class VoiceWebSocketHandler:
                 await self._send_status(STATUS_THINKING)
 
                 # Send the text to Google
-                await gemini.send_text(user_text)
+                if gemini.is_connected:
+                    await gemini.send_text(user_text)
+                else:
+                    log.info("user_text_dropped_gemini_not_connected", session_id=self.session_id)
 
 
             

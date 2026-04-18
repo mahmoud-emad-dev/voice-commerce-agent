@@ -19,6 +19,8 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                 "Use this when the customer wants products, options, recommendations, or more items in a product type. "
                 "This includes requests like 'show me shorts', 'more shorts', 'summer clothing', "
                 "'light jackets', or 'find me something under $50'. "
+                "For pagination, if the user says 'show me more', 'what else', or 'anything else', "
+                "call this again with the same query and set offset to previous_offset + previous_limit. "
                 "Use this instead of search_categories when the user wants actual products, not just category names. "
                 "Do not call this for filler, partial, or ambiguous voice utterances such as "
                 "'what about', 'okay', '.', 'yes', or unfinished speech. "
@@ -42,9 +44,22 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                             "Only include if the user specifically mentioned a price limit."
                         ),
                     ),
+                    "limit": types.Schema(
+                        type=types.Type.INTEGER,
+                        description=(
+                            "Optional page size. Defaults to 5. Use values like 5 or 10."
+                        ),
+                    ),
+                    "offset": types.Schema(
+                        type=types.Type.INTEGER,
+                        description=(
+                            "Optional pagination offset. Defaults to 0. "
+                            "For 'show me more', increase by the previous limit."
+                        ),
+                    ),
                 },
                 required=["query"],
-                # max_price is optional — not in required list
+                # max_price, limit, and offset are optional — not in required list
             ),
         )
     ]
@@ -62,7 +77,9 @@ SEARCH_CATEGORIES_TOOL = types.Tool(
                 "counts when called with no arguments, or products in that category "
                 "when given a category name. Do not use this for open-ended product finding "
                 "or recommendation requests like 'more shorts' or 'find light summer clothes'; "
-                "use search_products for those."
+                "use search_products for those. For pagination in category browse mode, "
+                "if the user says 'show me more in this category', call again with "
+                "offset = previous_offset + previous_limit."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
@@ -81,6 +98,14 @@ SEARCH_CATEGORIES_TOOL = types.Tool(
                     "in_stock_only": types.Schema(
                         type=types.Type.BOOLEAN,
                         description="If true, only return products that are currently in stock.",
+                    ),
+                    "limit": types.Schema(
+                        type=types.Type.INTEGER,
+                        description="Optional page size for categories/products listing.",
+                    ),
+                    "offset": types.Schema(
+                        type=types.Type.INTEGER,
+                        description="Optional pagination offset. Defaults to 0.",
                     ),
                 },
             ),
