@@ -27,6 +27,7 @@ class HighlightProduct(_ActionBase):
     intensity : 'primary' = bright pulse + lift (first result)
                 'secondary' = soft glow (results 2-4, and transcript mentions)
     auto_fade_ms: total ms before highlight fully fades away
+    show_badge: whether the browser should render the numeric search-order badge
     """
     action: Literal["highlight_product"] = "highlight_product"
     product_id: int
@@ -34,6 +35,7 @@ class HighlightProduct(_ActionBase):
     delay_ms: int = 0
     intensity: Literal["primary", "secondary"] = "primary"
     auto_fade_ms: int = 8000
+    show_badge: bool = False
     
 class ScrollToProduct(_ActionBase):
     """
@@ -154,6 +156,7 @@ def highlight(
     delay_ms: int = 0,
     intensity: Literal["primary", "secondary"] = "primary",
     auto_fade_ms: int = 8000,
+    show_badge: bool = False,
 ) -> HighlightProduct:
     return HighlightProduct(
         product_id=product_id,
@@ -161,6 +164,7 @@ def highlight(
         delay_ms=delay_ms,
         intensity=intensity,
         auto_fade_ms=auto_fade_ms,
+        show_badge=show_badge,
     )
  
 def notify(message: str, level: NotificationLevel = "info", duration_ms: int = 3000) -> ShowNotification:

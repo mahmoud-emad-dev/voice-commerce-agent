@@ -108,6 +108,7 @@ class ActionDispatcher:
                         delay_ms=i * STAGGER_MS,
                         intensity="primary" if i == 0 else "secondary",
                         auto_fade_ms=FADE_MS,
+                        show_badge=True,
                     )
                 )
 
