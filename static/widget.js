@@ -1930,6 +1930,12 @@
     }
 
     function _performHighlightStep(item) {
+        if (_store && typeof _store.revealProduct === 'function') {
+            try {
+                _store.revealProduct(item.productId);
+            } catch (_) {}
+        }
+
         var rawEl = _store.findProduct(item.productId);
         var el = _resolveHighlightTarget(rawEl, item.productId);
         if (!el) {
@@ -2336,6 +2342,13 @@
                     window.__VC_EMBED_DEMO__ === true;
             },
 
+            revealProduct: function (productId) {
+                if (typeof window.vcRevealProduct === 'function') {
+                    return window.vcRevealProduct(productId);
+                }
+                return false;
+            },
+
             findProduct: function (productId) {
                 return (
                     document.querySelector('[data-product_id="' + productId + '"]') ||
@@ -2402,6 +2415,8 @@
                     document.querySelector('.post-' + productId)
                 );
             },
+
+            revealProduct: function () { return false; },
 
             updateCartBadge: function (count) {
                 /* WooCommerce Storefront / most themes use .cart-contents-count */
@@ -2530,6 +2545,8 @@
                 );
             },
 
+            revealProduct: function () { return false; },
+
             updateCartBadge: function (count) {
                 var selectors = [
                     '.cart-count',
@@ -2583,6 +2600,8 @@
         /* ── Generic fallback adapter ───────────────────────────────────────── */
         generic: {
             detect: function () { return true; },   /* always matches as fallback */
+
+            revealProduct: function () { return false; },
 
             findProduct: function (productId) {
                 /* Try both hyphen and underscore attribute variants */

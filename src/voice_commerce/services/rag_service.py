@@ -67,6 +67,7 @@ class CategorySummaryEntry(TypedDict):
 
 CategorySummary: TypeAlias = dict[str, CategorySummaryEntry]
 ProductsByCategory: TypeAlias = dict[str, list[CategoryProductSnapshot]]
+CategoryLookup: TypeAlias = dict[str, str]
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 _service_instance: "RagService | None" = None
@@ -93,6 +94,12 @@ class RagService:
         self._products_indexed = 0
         self._category_summary: CategorySummary = {}
         self._products_by_category: ProductsByCategory = {}
+        self._category_lookup: CategoryLookup = {}
+
+    @staticmethod
+    def _normalize_category_key(value: str) -> str:
+        """Normalize category strings for case-insensitive matching."""
+        return " ".join(str(value or "").strip().lower().split())
 
     @staticmethod
     def _parse_category_path(raw_name: str) -> CategoryPathParts:
@@ -163,7 +170,7 @@ class RagService:
             "parent_groups": list(data["parent_groups"]),
         }
 
-    def _build_category_indexes(self, products: list[Product]) -> tuple[CategorySummary, ProductsByCategory]:
+    def _build_category_indexes(self, products: list[Product]) -> tuple[CategorySummary, ProductsByCategory, CategoryLookup]:
         """
         Build category summary and grouped product snapshots from loaded products.
         Grouping key is the leaf category because UX/tooling uses product-type filters
@@ -186,7 +193,15 @@ class RagService:
 
         summary: CategorySummary = {}
         for category, items in grouped.items():
-            items_sorted = sorted(items, key=lambda item: (item["name"].lower(), item["id"]))
+            items_sorted = sorted(
+                items,
+                key=lambda item: (
+                    item["stock_status"] != "instock",
+                    item["price"],
+                    item["name"].lower(),
+                    item["id"],
+                ),
+            )
             subcategory_counts = Counter(item["sub_category"] for item in items_sorted if item["sub_category"])
             parent_groups = Counter(item["main_category"] for item in items_sorted if item["main_category"])
             summary[category] = {
@@ -205,7 +220,11 @@ class RagService:
             grouped_bucket_count=len(grouped),
             # top_categories=sorted(summary.keys())[:] if summary else [],
         )
-        return summary, grouped
+        category_lookup: CategoryLookup = {
+            self._normalize_category_key(category_name): category_name
+            for category_name in summary
+        }
+        return summary, grouped, category_lookup
 
     @property
     def category_summary(self) -> CategorySummary:
@@ -233,6 +252,141 @@ class RagService:
             )
         ]
 
+    def resolve_category_name(self, category: str) -> str | None:
+        """
+        Resolve a user-provided category to a known leaf category.
+
+        Tries normalized exact match first, then a single unambiguous partial match.
+        """
+        normalized_category = self._normalize_category_key(category)
+        if not normalized_category:
+            return None
+
+        exact_match = self._category_lookup.get(normalized_category)
+        if exact_match:
+            return exact_match
+
+        contains_matches = [
+            category_name
+            for category_name in self.list_categories()
+            if normalized_category in self._normalize_category_key(category_name)
+        ]
+        if len(contains_matches) == 1:
+            return contains_matches[0]
+
+        return None
+
+    @staticmethod
+    def _normalize_query_text(value: str) -> str:
+        """Normalize free-text queries for lightweight rule-based reranking."""
+        return " ".join(str(value or "").strip().lower().split())
+
+    def _preferred_categories_for_query(self, query: str) -> tuple[set[str], set[str]]:
+        """
+        Infer preferred and discouraged categories from obvious intent words.
+
+        This is a narrow heuristic layer on top of vector search, not a replacement.
+        """
+        normalized_query = self._normalize_query_text(query)
+        preferred: set[str] = set()
+        discouraged: set[str] = set()
+
+        direct_category_rules = {
+            "short": "Shorts",
+            "shorts": "Shorts",
+            "tee": "Tees",
+            "tees": "Tees",
+            "t-shirt": "Tees",
+            "t shirts": "Tees",
+            "shirt": "Tees",
+            "shirts": "Tees",
+            "tank": "Tanks",
+            "tanks": "Tanks",
+            "bra": "Bras & Tanks",
+            "bras": "Bras & Tanks",
+            "jacket": "Jackets",
+            "jackets": "Jackets",
+            "pant": "Pants",
+            "pants": "Pants",
+            "hoodie": "Hoodies & Sweatshirts",
+            "hoodies": "Hoodies & Sweatshirts",
+            "sweatshirt": "Hoodies & Sweatshirts",
+            "sweatshirts": "Hoodies & Sweatshirts",
+            "watch": "Watches",
+            "watches": "Watches",
+            "bag": "Bags",
+            "bags": "Bags",
+        }
+        for token, category_name in direct_category_rules.items():
+            if token in normalized_query:
+                preferred.add(category_name)
+
+        summer_cues = {"summer", "light", "lighter", "lightweight", "cool", "breathable", "hot weather", "warm weather"}
+        if any(cue in normalized_query for cue in summer_cues):
+            preferred.update({"Shorts", "Tees", "Tanks", "Bras & Tanks", "Performance Fabrics"})
+            discouraged.update({"Hoodies & Sweatshirts", "Jackets", "Pants"})
+
+        return preferred, discouraged
+
+    def _rerank_products_for_query(self, query: str, products: list[Product]) -> list[Product]:
+        """
+        Apply a light heuristic rerank over vector results to reduce obvious bad fits.
+        """
+        normalized_query = self._normalize_query_text(query)
+        preferred_categories, discouraged_categories = self._preferred_categories_for_query(normalized_query)
+        query_terms = set(normalized_query.replace("-", " ").split())
+
+        if not products:
+            return []
+
+        scored: list[tuple[float, Product]] = []
+        for original_rank, product in enumerate(products):
+            score = float(len(products) - original_rank)
+            product_name = self._normalize_query_text(product.name)
+            product_short = self._normalize_query_text(product.short_description)
+            product_desc = self._normalize_query_text(product.description)
+            product_categories = {name for name in product.category_names}
+
+            for category_name in preferred_categories:
+                if category_name in product_categories:
+                    score += 12.0
+            for category_name in discouraged_categories:
+                if category_name in product_categories:
+                    score -= 10.0
+
+            if query_terms:
+                for term in query_terms:
+                    if len(term) < 3:
+                        continue
+                    if term in product_name:
+                        score += 4.0
+                    if term in product_short:
+                        score += 2.0
+                    if term in product_desc:
+                        score += 1.0
+
+            scored.append((score, product))
+
+        scored.sort(key=lambda item: (-item[0], item[1].price, item[1].name.lower(), item[1].id))
+        return [product for _, product in scored]
+
+    def search_category_summaries(self, keyword: str | None = None) -> list[tuple[str, CategorySummaryEntry]]:
+        """Return category summaries sorted by descending count, optionally filtered by keyword."""
+        normalized_keyword = self._normalize_category_key(keyword or "")
+        matches: list[tuple[str, CategorySummaryEntry]] = []
+
+        for category_name, summary in self._category_summary.items():
+            haystacks = [
+                self._normalize_category_key(category_name),
+                *[self._normalize_category_key(name) for name in summary.get("subcategories", [])],
+                *[self._normalize_category_key(name) for name in summary.get("parent_groups", [])],
+            ]
+            if not normalized_keyword or any(normalized_keyword in value for value in haystacks):
+                matches.append((category_name, self._copy_category_summary_entry(summary)))
+
+        matches.sort(key=lambda item: (-int(item[1].get("count", 0)), item[0].lower()))
+        return matches
+
     def get_products_for_category(
         self,
         category: str,
@@ -241,9 +395,13 @@ class RagService:
         in_stock_only: bool = False,
     ) -> list[CategoryProductSnapshot]:
         """
-        Internal deterministic retrieval helper for future category-search tool.
+        Internal deterministic retrieval helper for browse/category-constrained retrieval.
         """
-        items = [self._copy_product_snapshot(item) for item in self._products_by_category.get(category, [])]
+        resolved_category = self.resolve_category_name(category)
+        if not resolved_category:
+            return []
+
+        items = [self._copy_product_snapshot(item) for item in self._products_by_category.get(resolved_category, [])]
         if max_price is not None:
             items = [item for item in items if item["price"] <= max_price]
         if in_stock_only:
@@ -274,7 +432,7 @@ class RagService:
             return 0
 
         # 1.5 Build category intelligence caches for prompt/context and deterministic retrieval.
-        self._category_summary, self._products_by_category = self._build_category_indexes(all_products)
+        self._category_summary, self._products_by_category, self._category_lookup = self._build_category_indexes(all_products)
         log.info(
             "rag_category_caches_ready",
             category_count=len(self._category_summary),
@@ -326,6 +484,7 @@ class RagService:
         query: str,
         limit: int = 5,
         max_price: float | None = None,
+        category: str | None = None,
     ) -> list[Product]:
         """
         Semantic product search. Runs on every user voice command.
@@ -340,12 +499,32 @@ class RagService:
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
         loop = asyncio.get_running_loop()
         try:
-            search_results = await loop.run_in_executor(None, lambda: self.retriever.retrieve(query, limit, max_price))
+            retrieval_limit = max(limit, 25)
+            search_results = await loop.run_in_executor(
+                None,
+                lambda: self.retriever.retrieve(query, retrieval_limit, max_price),
+            )
         except Exception as e:
             log.exception("rag_search_error", query=query[:80], error=str(e))
             return []
 
-        return search_results
+        if category:
+            resolved_category = self.resolve_category_name(category)
+            if not resolved_category:
+                return []
+
+            allowed_ids = {
+                item["id"]
+                for item in self.get_products_for_category(
+                    resolved_category,
+                    max_price=max_price,
+                    in_stock_only=False,
+                )
+            }
+            search_results = [product for product in search_results if product.id in allowed_ids]
+
+        reranked_results = self._rerank_products_for_query(query, search_results)
+        return reranked_results[:limit]
     
     # ── Stats ─────────────────────────────────────────────────────────────────
 

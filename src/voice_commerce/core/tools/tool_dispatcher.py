@@ -27,6 +27,7 @@ class ToolContext:
 
 _TOOLS: dict[str, Any] = {
     "search_products": product_tools.search_products,
+    "search_categories": product_tools.search_categories,
     "get_product_details": product_tools.get_product_details,
     "add_to_cart": cart_tools.add_to_cart,
     "show_cart": cart_tools.show_cart,

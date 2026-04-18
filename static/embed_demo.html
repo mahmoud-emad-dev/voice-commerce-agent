@@ -2842,6 +2842,41 @@
     (function init() {
       window.__VC_EMBED_DEMO__ = true;
       window.vcAddToCart = handleVoiceAddToCart;
+      window.vcRevealProduct = function (productId) {
+        var pid = Number(productId);
+        if (!pid) return false;
+
+        var product = PRODUCTS.find(function (p) { return p.id === pid; });
+        if (!product) return false;
+
+        var currentMatch = document.querySelector('[data-product_id="' + pid + '"], [data-product-id="' + pid + '"]');
+        if (currentMatch) return true;
+
+        STATE.searchQuery = '';
+        STATE.activeCategory = 'all';
+        STATE.activeGender = 'all';
+        STATE.sortBy = 'default';
+
+        document.querySelector('input[name="s"]').value = '';
+        document.querySelectorAll('.f-cat').forEach(function (el) { el.checked = false; });
+        document.getElementById('f-men').checked = false;
+        document.getElementById('f-women').checked = false;
+        document.getElementById('f-unisex').checked = false;
+        document.getElementById('f-instock').checked = false;
+        document.getElementById('f-min').value = '';
+        document.getElementById('f-max').value = '';
+        document.getElementById('sort-select').value = 'default';
+
+        applyFilters();
+
+        var index = STATE.filtered.findIndex(function (p) { return p.id === pid; });
+        if (index === -1) return false;
+
+        var targetPage = Math.floor(index / STATE.perPage) + 1;
+        goPage(targetPage);
+        scrollToShop();
+        return true;
+      };
       window.vcGetCartSnapshot = function () {
         return Object.values(STATE.cart).map(function (item) {
           var price = item.product.sale > 0 ? item.product.sale : item.product.price;
