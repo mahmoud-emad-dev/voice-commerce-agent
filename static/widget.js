@@ -593,10 +593,10 @@
         '  border-radius: var(--vc-radius-sm);',
         '}',
         '.vc-highlight-fade {',
-        '  outline: none !important;',
-        '  box-shadow: none !important;',
-        '  transform: none !important;',
-        '  transition: all 0.7s ease !important;',
+            '  outline: none !important;',
+            '  box-shadow: none !important;',
+            '  transform: none !important;',
+            '  transition: all 0.7s ease !important;',
         '}',
         '.vc-highlight-badge {',
         '  position: absolute !important;',
@@ -637,52 +637,70 @@
         '#vc-modal-overlay{',
         '  position:fixed;inset:0;',
         '  z-index:calc(var(--vc-z) + 20);',
-        '  background:rgba(15,23,42,0.42);',
-        '  backdrop-filter:blur(6px);',
+        '  background:rgba(15,23,42,0.34);',
+        '  backdrop-filter:blur(14px) saturate(1.05);',
         '  display:none;align-items:center;justify-content:center;',
-        '  padding:16px;',
+        '  padding:24px;',
         '  animation:vc-toast-in 0.18s ease;',
         '}',
         '#vc-modal-overlay.vc-open{display:flex;}',
         '.vc-modal-box{',
-        '  background:var(--vc-surface);',
-        '  border-radius:16px;',
+        '  background:#ffffff;',
+        '  border-radius:24px;',
         '  padding:0;',
-        '  max-width:460px;width:100%;',
-        '  max-height:min(86vh,760px);',
+        '  max-width:760px;width:min(100%, 760px);',
+        '  max-height:min(88vh,820px);',
         '  overflow:hidden;',
-        '  border:1px solid var(--vc-border);',
-        '  box-shadow:0 24px 80px rgba(0,0,0,0.35);',
+        '  border:1px solid rgba(226,232,240,0.85);',
+        '  box-shadow:0 36px 110px rgba(15,23,42,0.24);',
         '  font-family:var(--vc-font);',
-        '  animation:vc-slide-up 0.22s ease;',
+        '  animation:vc-slide-up 0.24s ease;',
         '  position:relative;',
         '}',
-        '.vc-modal-inner{display:flex;flex-direction:column;background:var(--vc-surface);}',
-        '.vc-modal-close-x{position:absolute;top:10px;right:10px;z-index:2;width:34px;height:34px;border-radius:999px;border:1px solid var(--vc-border);background:rgba(255,255,255,0.92);color:var(--vc-text);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s ease,border-color 0.15s ease;}',
-        '.vc-modal-close-x:hover{background:var(--vc-surface2);border-color:var(--vc-border2);}',
-        '.vc-modal-img-wrap{background:linear-gradient(180deg,var(--vc-surface2),var(--vc-surface3));height:250px;display:flex;align-items:center;justify-content:center;overflow:hidden;}',
-        '.vc-modal-content{display:flex;flex-direction:column;gap:10px;padding:16px 16px 14px;}',
-        '.vc-modal-category{display:inline-block;align-self:flex-start;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;background:var(--vc-surface3);color:var(--vc-text2);}',
-        '.vc-modal-title{font-size:24px;font-weight:700;line-height:1.22;color:var(--vc-text);margin:0;letter-spacing:-0.01em;}',
-        '.vc-modal-price{font-size:22px;font-weight:800;color:var(--vc-accent);margin:0;}',
-        '.vc-modal-desc{font-size:13px;color:var(--vc-text2);line-height:1.6;margin:0;}',
+        '.vc-modal-inner{display:flex;flex-direction:column;background:#ffffff;position:relative;}',
+        '.vc-modal-shell{display:flex;flex-direction:column;background:#ffffff;}',
+        '.vc-modal-close-x{position:absolute;top:18px;right:18px;z-index:3;width:42px;height:42px;border-radius:999px;border:1px solid rgba(226,232,240,0.95);background:rgba(255,255,255,0.98);color:#111827;font-size:22px;font-weight:400;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(15,23,42,0.12);transition:transform 0.16s ease,background 0.16s ease,border-color 0.16s ease;}',
+        '.vc-modal-close-x:hover{background:#f8fafc;border-color:#cbd5e1;transform:scale(1.04);}',
+        '.vc-modal-img-wrap{background:#ffffff;min-height:340px;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:36px 36px 18px;border-bottom:1px solid #eef2f7;}',
+        '.vc-modal-content{display:flex;flex-direction:column;gap:14px;padding:24px 24px 26px;background:#ffffff;}',
+        '.vc-modal-category{display:inline-flex;align-self:flex-start;padding:6px 11px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;background:#eff6ff;color:#1d4ed8;border:1px solid #dbeafe;}',
+        '.vc-modal-title{font-size:38px;font-weight:800;line-height:1.04;color:#0f172a;margin:0;letter-spacing:-0.035em;}',
+        '.vc-modal-price{font-size:34px;font-weight:800;color:#0f172a;margin:2px 0 0;letter-spacing:-0.03em;}',
+        '.vc-modal-desc{font-size:15px;color:#475569;line-height:1.72;margin:0;max-width:56ch;}',
         '.vc-modal-img{',
-        '  width:100%;height:100%;object-fit:contain;',
+        '  width:100%;height:100%;max-height:360px;object-fit:contain;',
         '  display:block;',
         '}',
-        '.vc-modal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}',
+        '.vc-modal-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;}',
         '.vc-btn{',
-        '  flex:1;min-width:120px;padding:10px 12px;',
-        '  border-radius:var(--vc-radius-sm);',
+        '  flex:1;min-width:180px;padding:14px 18px;',
+        '  border-radius:14px;',
         '  border:1px solid transparent;cursor:pointer;',
-        '  font-size:13px;font-weight:500;',
+        '  font-size:15px;font-weight:700;',
         '  font-family:var(--vc-font);',
-        '  transition:background 0.15s ease,border-color 0.15s ease,color 0.15s ease;',
+        '  transition:transform 0.15s ease,background 0.15s ease,border-color 0.15s ease,color 0.15s ease,box-shadow 0.15s ease;',
         '}',
-        '.vc-btn-primary{background:var(--vc-accent);color:#fff;}',
-        '.vc-btn-primary:hover{background:var(--vc-accent-dark);}',
-        '.vc-btn-ghost{background:var(--vc-surface2);color:var(--vc-text2);border-color:var(--vc-border);}',
-        '.vc-btn-ghost:hover{background:var(--vc-surface3);}',
+        '.vc-btn:hover{transform:translateY(-1px);}',
+        '.vc-btn-primary{background:#0f172a;color:#fff;box-shadow:0 14px 28px rgba(15,23,42,0.16);}',
+        '.vc-btn-primary:hover{background:#111827;box-shadow:0 16px 32px rgba(15,23,42,0.2);}',
+        '.vc-btn-ghost{background:#ffffff;color:#0f172a;border-color:#cbd5e1;}',
+        '.vc-btn-ghost:hover{background:#f8fafc;border-color:#94a3b8;}',
+        '@media (min-width: 760px){',
+        '  .vc-modal-shell{flex-direction:row;align-items:stretch;}',
+        '  .vc-modal-img-wrap{flex:0 0 46%;min-height:520px;max-width:360px;border-bottom:none;border-right:1px solid #eef2f7;padding:40px 24px;}',
+        '  .vc-modal-content{flex:1;justify-content:center;padding:34px 34px 32px;}',
+        '  .vc-modal-actions{margin-top:16px;}',
+        '}',
+        '@media (max-width: 640px){',
+        '  #vc-modal-overlay{padding:14px;}',
+        '  .vc-modal-box{border-radius:20px;}',
+        '  .vc-modal-close-x{top:14px;right:14px;width:38px;height:38px;font-size:20px;}',
+        '  .vc-modal-img-wrap{min-height:260px;padding:28px 20px 12px;}',
+        '  .vc-modal-content{padding:18px 18px 20px;gap:12px;}',
+        '  .vc-modal-title{font-size:30px;}',
+        '  .vc-modal-price{font-size:28px;}',
+        '  .vc-btn{min-width:100%;padding:13px 16px;font-size:14px;}',
+        '}',
 
         /* ── Product search results panel (shown inside transcript) ────────────  */
         '.vc-products-panel{',
@@ -1375,6 +1393,7 @@
             _showToast(_i18n('connectFirst'), 'warning');
             return;
         }
+        _closeModal();
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             _showToast('Microphone not supported in this browser.', 'error');
             return;
@@ -1681,12 +1700,16 @@
         console.log('🔴 [DEBUG 2] Action type is:', msg.action);
         switch (msg.action) {
             case 'highlight_product':
+                if (msg.show_badge === true || msg.scroll_to !== false) {
+                    _closeModal();
+                }
                 _queueHighlightProduct(
                     msg.product_id,
                     msg.scroll_to !== false,
                     msg.delay_ms || 0,
                     msg.intensity || 'primary',
-                    msg.auto_fade_ms || 8000
+                    msg.auto_fade_ms || 8000,
+                    msg.show_badge === true
                 );
                 break;
             case 'scroll_to_product':
@@ -1703,6 +1726,7 @@
                 _showToast(msg.message, msg.level || 'info', msg.duration_ms);
                 break;
             case 'open_cart':
+                _closeModal();
                 _doOpenCart();
                 break;
             case 'close_cart':
@@ -1727,19 +1751,24 @@
                 }
                 break;
             case 'set_search_query':
+                _closeModal();
                 _doSetSearchQuery(msg.query, msg.submit);
                 break;
             case 'clear_highlights':
+                _closeModal();
                 _doClearHighlights();
                 break;
             case 'show_products':
+                _closeModal();
                 /* Render product cards inside the chat panel */
                 _renderProductCards(msg.products);
                 break;
             case 'navigate_to':
+                _closeModal();
                 if (msg.url) window.location.href = msg.url;
                 break;
             case 'apply_filter':
+                _closeModal();
                 _doApplyFilter(msg.filter_type, msg.filter_value);
                 break;
             default:
@@ -1753,10 +1782,9 @@
     var _vcPendingHighlightTimers = [];
     var _vcQueuedHighlights = [];
     var _vcHighlightBatchTimer = null;
-    var _vcHighlightRunnerTimer = null;
-    var _vcHighlightRunId = 0;
     var _vcLastScrollAt = 0;
     var _vcLastHighlightDelayMs = 1400;
+    var _vcModalAutoCloseTimer = null;
 
     function _clearProductFocusState() {}
 
@@ -1868,9 +1896,50 @@
         if (el._vcRemoveTimer) { clearTimeout(el._vcRemoveTimer); el._vcRemoveTimer = null; }
     }
 
+    function _resolveHighlightTarget(rawEl, productId) {
+        var candidates = [];
+        if (rawEl) candidates.push(rawEl);
+        document.querySelectorAll('[data-product_id="' + productId + '"], [data-product-id="' + productId + '"], .post-' + productId).forEach(function (node) {
+            candidates.push(node);
+        });
+
+        var best = null;
+        var bestScore = -1;
+        for (var i = 0; i < candidates.length; i++) {
+            var node = candidates[i];
+            if (!node || node.nodeType !== 1) continue;
+
+            var host = node.closest('li.product, article.product, [data-product_id], [data-product-id], .product, .product-item, .vc-demo-card') || node;
+            if (!host || host.nodeType !== 1) continue;
+            if (host.offsetParent === null) continue;
+
+            var rect = host.getBoundingClientRect();
+            if (rect.width < 40 || rect.height < 40) continue;
+
+            var score = 0;
+            if (_isElementMostlyInView(host)) score += 100;
+            score += Math.max(0, Math.min(80, rect.height));
+            score += Math.max(0, Math.min(80, rect.width));
+
+            if (score > bestScore) {
+                best = host;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
     function _performHighlightStep(item) {
-        var el = _store.findProduct(item.productId);
-        if (!el) return;
+        var rawEl = _store.findProduct(item.productId);
+        var el = _resolveHighlightTarget(rawEl, item.productId);
+        if (!el) {
+            console.warn('[VoiceCommerce] highlight target not found/visible', {
+                productId: item.productId,
+                intensity: item.intensity,
+                scroll: item.scroll
+            });
+            return;
+        }
 
         _doCloseCart();
         _clearHighlightTimers(el);
@@ -1878,9 +1947,18 @@
         el.classList.remove('vc-highlight-primary', 'vc-highlight-secondary', 'vc-highlight-fade', 'vc-highlighted');
 
         var shouldGuideScroll = !!item.scroll;
-        var cls = shouldGuideScroll ? 'vc-highlight-primary' : (item.intensity === 'primary' ? 'vc-highlight-primary' : 'vc-highlight-secondary');
+        var cls;
+        if (shouldGuideScroll || item.intensity === 'primary') {
+            cls = 'vc-highlight-primary';
+        } else {
+            cls = 'vc-highlight-secondary';
+        }
         el.classList.add(cls);
-        _setHighlightBadge(el, item.order);
+        if (!item.showBadge) {
+            _removeHighlightBadge(el);
+        } else {
+            _setHighlightBadge(el, item.order);
+        }
 
         if (shouldGuideScroll) {
             _scrollIntoViewSequenced(el, true);
@@ -1904,25 +1982,6 @@
         }, item.autoFadeMs);
     }
 
-    function _runQueuedHighlights(batch, index, runId) {
-        if (runId !== _vcHighlightRunId || index >= batch.length) return;
-
-        var waitMs;
-        if (index === 0) {
-            waitMs = Math.max(0, batch[index].delayMs);
-        } else {
-            var deltaMs = Math.max(0, batch[index].delayMs - batch[index - 1].delayMs);
-            _vcLastHighlightDelayMs = deltaMs || _vcLastHighlightDelayMs;
-            waitMs = Math.max(1200, deltaMs || 0);
-        }
-
-        _vcHighlightRunnerTimer = setTimeout(function () {
-            if (runId !== _vcHighlightRunId) return;
-            _performHighlightStep(batch[index]);
-            _runQueuedHighlights(batch, index + 1, runId);
-        }, waitMs);
-    }
-
     function _flushQueuedHighlights() {
         if (_vcHighlightBatchTimer) {
             clearTimeout(_vcHighlightBatchTimer);
@@ -1937,19 +1996,27 @@
 
         for (var i = 0; i < batch.length; i++) {
             batch[i].order = i + 1;
+            if (i > 0) {
+                var deltaMs = Math.max(0, batch[i].delayMs - batch[i - 1].delayMs);
+                if (deltaMs > 0) _vcLastHighlightDelayMs = deltaMs;
+            }
         }
-
-        _vcHighlightRunId += 1;
-        _runQueuedHighlights(batch, 0, _vcHighlightRunId);
+        batch.forEach(function (item) {
+            var timerId = setTimeout(function () {
+                _performHighlightStep(item);
+            }, Math.max(0, item.delayMs));
+            _vcPendingHighlightTimers.push(timerId);
+        });
     }
 
-    function _queueHighlightProduct(productId, scroll, delayMs, intensity, autoFadeMs) {
+    function _queueHighlightProduct(productId, scroll, delayMs, intensity, autoFadeMs, showBadge) {
         _vcQueuedHighlights.push({
             productId: productId,
             scroll: !!scroll,
             delayMs: delayMs || 0,
             intensity: intensity || 'primary',
             autoFadeMs: autoFadeMs || 8000,
+            showBadge: showBadge === true,
             order: 1
         });
 
@@ -2155,6 +2222,7 @@
         box.innerHTML = [
             '<div class="vc-modal-inner">',
             '<button class="vc-modal-close-x" id="vc-modal-close-x" type="button" aria-label="Close product details">×</button>',
+            '<div class="vc-modal-shell">',
             img ? '<div class="vc-modal-img-wrap"><img class="vc-modal-img" src="' + _esc(img) + '" alt="' + _esc(productName || '') + '" onerror="this.style.display=\'none\'"></div>' : '',
             '<div class="vc-modal-content">',
             category ? '<span class="vc-modal-category">' + _esc(category) + '</span>' : '',
@@ -2167,10 +2235,17 @@
             '</div>',
             '</div>',
             '</div>',
+            '</div>',
         ].join('');
 
         overlay.classList.add('vc-open');
         overlay.onclick = function (e) { if (e.target === overlay) _closeModal(); };
+        if (_vcModalAutoCloseTimer) {
+            clearTimeout(_vcModalAutoCloseTimer);
+        }
+        _vcModalAutoCloseTimer = setTimeout(function () {
+            _closeModal();
+        }, 15000);
 
         var closeBtn = document.getElementById('vc-modal-close-x');
         if (closeBtn) closeBtn.onclick = _closeModal;
@@ -2201,6 +2276,10 @@
 
     function _closeModal() {
         var overlay = document.getElementById('vc-modal-overlay');
+        if (_vcModalAutoCloseTimer) {
+            clearTimeout(_vcModalAutoCloseTimer);
+            _vcModalAutoCloseTimer = null;
+        }
         if (overlay) overlay.classList.remove('vc-open');
     }
 
@@ -2219,12 +2298,7 @@
             clearTimeout(_vcHighlightBatchTimer);
             _vcHighlightBatchTimer = null;
         }
-        if (_vcHighlightRunnerTimer) {
-            clearTimeout(_vcHighlightRunnerTimer);
-            _vcHighlightRunnerTimer = null;
-        }
         _vcQueuedHighlights = [];
-        _vcHighlightRunId += 1;
         _vcLastScrollAt = 0;
         _vcLastHighlightDelayMs = 1400;
 
@@ -2658,6 +2732,7 @@
         var text = input ? input.value.trim() : '';
         if (!text) return;
         if (STATE.wsStatus !== 'connected') { _showToast(_i18n('connectFirst'), 'warning'); return; }
+        _closeModal();
 
         // Create the user bubble AND update the state tracker so AI knows to start a new one!
         STATE.currentBubble = _addBubble('vc-user', text);
