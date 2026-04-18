@@ -54,6 +54,7 @@ class Retriever:
         self,
         query: str,
         limit: int = 5,
+        offset: int = 0,
         max_price: float | None = None,
         ) -> list[Product]:
         """
@@ -82,7 +83,12 @@ class Retriever:
 
         # 2. Search Qdrant (Returns perfectly hydrated Pydantic models!) 
         try:
-            retrieved_products = self._store.search_products(query_vector, limit, max_price)
+            retrieved_products = self._store.search_products(
+                query_vector=query_vector,
+                limit=limit,
+                offset=offset,
+                max_price=max_price,
+            )
         except Exception as e:
             log.exception("retriever_search_failed", query=query[:80], error=str(e))
             return []

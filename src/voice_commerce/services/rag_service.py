@@ -393,6 +393,8 @@ class RagService:
         *,
         max_price: float | None = None,
         in_stock_only: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[CategoryProductSnapshot]:
         """
         Internal deterministic retrieval helper for browse/category-constrained retrieval.
@@ -406,6 +408,11 @@ class RagService:
             items = [item for item in items if item["price"] <= max_price]
         if in_stock_only:
             items = [item for item in items if item["stock_status"] == "instock"]
+        safe_offset = max(0, int(offset))
+        if safe_offset:
+            items = items[safe_offset:]
+        if limit is not None:
+            items = items[: max(1, int(limit))]
         return items
 
 
@@ -483,6 +490,7 @@ class RagService:
         self,
         query: str,
         limit: int = 5,
+        offset: int = 0,
         max_price: float | None = None,
         category: str | None = None,
     ) -> list[Product]:
@@ -502,7 +510,12 @@ class RagService:
             retrieval_limit = max(limit, 25)
             search_results = await loop.run_in_executor(
                 None,
-                lambda: self.retriever.retrieve(query, retrieval_limit, max_price),
+                lambda: self.retriever.retrieve(
+                    query=query,
+                    limit=retrieval_limit,
+                    offset=max(0, offset),
+                    max_price=max_price,
+                ),
             )
         except Exception as e:
             log.exception("rag_search_error", query=query[:80], error=str(e))

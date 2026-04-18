@@ -16,7 +16,8 @@
 # =============================================================================
 
 from __future__ import annotations
-from typing import Any
+import hashlib
+from typing import Any, TypedDict
 
 import structlog
 # 1. We keep WooCommerce client for getting live details
@@ -28,6 +29,31 @@ from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
 
+_DEFAULT_PAGE_SIZE = 5
+_MAX_PAGE_SIZE = 10
+_MAX_QUERIES_PER_SESSION = 20
+
+
+class _SearchQueryCacheEntry(TypedDict):
+    returned_ids: set[int]
+    next_offset: int
+
+
+_SEARCH_RESULT_CACHE: dict[str, dict[str, _SearchQueryCacheEntry]] = {}
+
+
+def _query_cache_key(query: str, max_price: float | None) -> str:
+    canonical = f"{query.strip().lower()}|{'' if max_price is None else f'{max_price:.2f}'}"
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
+
+
+def _ensure_session_cache(session_id: str) -> dict[str, _SearchQueryCacheEntry]:
+    cache = _SEARCH_RESULT_CACHE.setdefault(session_id, {})
+    if len(cache) >= _MAX_QUERIES_PER_SESSION:
+        oldest_key = next(iter(cache))
+        cache.pop(oldest_key, None)
+    return cache
+
 
 def _format_category_result(category_name: str, summary: CategorySummaryEntry) -> str:
     """Build a concise spoken summary for one category."""
@@ -37,7 +63,13 @@ def _format_category_result(category_name: str, summary: CategorySummaryEntry) -
     return f"{category_name}: {count} product{'s' if count != 1 else ''}.{sample_text}"
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-async def search_products(query: str, max_price: float | None = None, category: str | None = None , session_id: str = "default",) -> ToolResponse:
+async def search_products(
+    query: str,
+    max_price: float | None = None,
+    limit: int = _DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+    session_id: str = "default",
+) -> ToolResponse:
     """
     Search the product catalog for items matching a natural language query.
  
@@ -50,7 +82,16 @@ async def search_products(query: str, max_price: float | None = None, category: 
         session_id: Injected by dispatcher. Not needed for search, but accepted
                     so the function signature is consistent with cart tools.
     """
-    log.info("search_products_live_rag", query=query, max_price=max_price)
+    requested_limit = max(1, min(int(limit), _MAX_PAGE_SIZE))
+    requested_offset = max(0, int(offset))
+    log.info(
+        "search_products_live_rag",
+        query=query,
+        max_price=max_price,
+        limit=requested_limit,
+        offset=requested_offset,
+        session_id=session_id,
+    )
 
     try:
         rag = get_rag_service()
@@ -58,19 +99,67 @@ async def search_products(query: str, max_price: float | None = None, category: 
         if not rag.is_ready:
             log.warning("search_attempted_while_rag_syncing")
             return ToolResponse.error("I am currently updating my catalog database. Please give me a few seconds and try your search again.")
-        # 1. Fetch semantic matches from the RAG Brain!
-        products = await rag.search_products(query=query, limit=5, max_price=max_price, category=category)
-        if not products:
-            suffix = f" under ${max_price:.0f}" if max_price else ""
-            cat_suffix = f" in {category}" if category else ""
-            return ToolResponse.error(f"I didn't find anything matching '{query}'{suffix}{cat_suffix}. Try different keywords or ask me what categories we carry.")
+        # 1. Resolve cursor state for this session/query.
+        session_cache = _ensure_session_cache(session_id)
+        cache_key = _query_cache_key(query, max_price)
+        cache_entry = session_cache.get(cache_key)
+        seen_ids = set(cache_entry["returned_ids"]) if cache_entry else set()
+        effective_offset = requested_offset or (cache_entry["next_offset"] if cache_entry else 0)
 
-        # 2. Gather the UI data dictionaries (using our new method on the Product model!)  
+        # 2. Fetch semantic matches with pagination and de-duplication.
+        products = []
+        attempts = 0
+        rolling_offset = effective_offset
+        while len(products) < requested_limit and attempts < 3:
+            fetch_size = max(requested_limit * 2, requested_limit)
+            batch = await rag.search_products(
+                query=query,
+                limit=fetch_size,
+                offset=rolling_offset,
+                max_price=max_price,
+            )
+            if not batch:
+                break
+
+            fresh = [item for item in batch if item.id not in seen_ids]
+            if fresh:
+                products.extend(fresh)
+                products = products[:requested_limit]
+
+            rolling_offset += len(batch)
+            attempts += 1
+            if len(batch) < fetch_size:
+                break
+
+        if not products:
+            if effective_offset > 0:
+                return ToolResponse.error(
+                    f"I couldn't find more results for '{query}'. "
+                    "Try a different keyword or adjust the price range."
+                )
+            suffix = f" under ${max_price:.0f}" if max_price else ""
+            return ToolResponse.error(
+                f"I didn't find anything matching '{query}'{suffix}. "
+                "Try different keywords or ask me what categories we carry."
+            )
+
+        seen_ids.update(p.id for p in products)
+        session_cache[cache_key] = {
+            "returned_ids": seen_ids,
+            "next_offset": rolling_offset,
+        }
+
+        # 3. Gather the UI data dictionaries (using our new method on the Product model!)
         count = len(products)
-        begining_text = f"Found {count} product{'s' if count != 1 else ''} for '{query}':"
+        range_start = effective_offset + 1
+        range_end = effective_offset + count
+        begining_text = (
+            f"Found {count} product{'s' if count != 1 else ''} for '{query}' "
+            f"(showing {range_start}-{range_end}):"
+        )
         lines = [begining_text]
         ui_products = []
-        # 3. Process both the AI text and UI data in a single pass
+        # 4. Process both the AI text and UI data in a single pass
         for p in products:
             response_dict = p.to_tool_response(detailed=False)
             lines.append(response_dict["ai_text"])
@@ -78,10 +167,18 @@ async def search_products(query: str, max_price: float | None = None, category: 
 
         lines.append("\nTo add one to your cart, just say which one.")
         ai_text = "\n".join(lines)
-        # 4. Return the explicit ToolResponse
+        # 5. Return the explicit ToolResponse with pagination metadata.
         return ToolResponse.success(
             ai_text=ai_text,
-            data={"products": ui_products}
+            data={
+                "products": ui_products,
+                "pagination": {
+                    "query": query,
+                    "limit": requested_limit,
+                    "offset": effective_offset,
+                    "next_offset": rolling_offset,
+                },
+            },
         )
     except RuntimeError:
         # Caught if settings are missing and WooCommerce never initialized
@@ -136,6 +233,8 @@ async def search_categories(
     category: str | None = None,
     max_price: float | None = None,
     in_stock_only: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
     session_id: str = "default",
 ) -> ToolResponse:
     """
@@ -144,7 +243,16 @@ async def search_categories(
     Mode 1: no category -> list available categories with counts.
     Mode 2: category set -> return products inside that category deterministically.
     """
-    log.info("search_categories", category=category, max_price=max_price, in_stock_only=in_stock_only)
+    safe_offset = max(0, int(offset))
+    safe_limit = max(1, min(int(limit), 25)) if limit is not None else None
+    log.info(
+        "search_categories",
+        category=category,
+        max_price=max_price,
+        in_stock_only=in_stock_only,
+        limit=safe_limit,
+        offset=safe_offset,
+    )
 
     try:
         rag = get_rag_service()
@@ -158,14 +266,16 @@ async def search_categories(
 
         if not category:
             sorted_categories = rag.search_category_summaries()
-            preview_limit = 12
-            preview_items = sorted_categories[:preview_limit]
+            effective_limit = safe_limit or 12
+            preview_items = sorted_categories[safe_offset : safe_offset + effective_limit]
             lines = ["Categories available:"]
             lines.extend(_format_category_result(category_name, summary) for category_name, summary in preview_items)
-            if len(sorted_categories) > preview_limit:
+            shown_total = safe_offset + len(preview_items)
+            if len(sorted_categories) > shown_total:
                 lines.append(
-                    f"There are {len(sorted_categories) - preview_limit} more categories available if you want me to browse one."
+                    f"There are {len(sorted_categories) - shown_total} more categories available."
                 )
+            next_offset = safe_offset + len(preview_items)
 
             return ToolResponse.success(
                 ai_text="\n".join(lines),
@@ -178,8 +288,14 @@ async def search_categories(
                             "subcategories": list(summary.get("subcategories", [])),
                             "parent_groups": list(summary.get("parent_groups", [])),
                         }
-                        for category_name, summary in sorted_categories
-                    ]
+                        for category_name, summary in preview_items
+                    ],
+                    "pagination": {
+                        "offset": safe_offset,
+                        "limit": effective_limit,
+                        "next_offset": next_offset,
+                        "has_more": next_offset < len(sorted_categories),
+                    },
                 },
             )
 
@@ -189,10 +305,18 @@ async def search_categories(
                 f"I couldn't find a category called '{category}'. Ask me what categories we carry for the full list."
             )
 
+        total_items: list[CategoryProductSnapshot] = rag.get_products_for_category(
+            resolved_category,
+            max_price=max_price,
+            in_stock_only=in_stock_only,
+        )
+        effective_limit = safe_limit or 5
         items: list[CategoryProductSnapshot] = rag.get_products_for_category(
             resolved_category,
             max_price=max_price,
             in_stock_only=in_stock_only,
+            limit=effective_limit,
+            offset=safe_offset,
         )
         if not items:
             filter_parts = []
@@ -203,21 +327,42 @@ async def search_categories(
             filter_suffix = f" with filters ({', '.join(filter_parts)})" if filter_parts else ""
             return ToolResponse.success(
                 ai_text=f"No products found in {resolved_category}{filter_suffix}.",
-                data={"category": resolved_category, "products": []},
+                data={
+                    "category": resolved_category,
+                    "products": [],
+                    "pagination": {
+                        "offset": safe_offset,
+                        "limit": effective_limit,
+                        "next_offset": safe_offset,
+                        "has_more": False,
+                    },
+                },
             )
 
         preview = "; ".join(f"{item['name']} ${item['price']:.2f}" for item in items[:5])
-        lines = [f"Found {len(items)} products in {resolved_category}."]
+        range_start = safe_offset + 1
+        range_end = safe_offset + len(items)
+        lines = [f"Found {len(total_items)} products in {resolved_category} (showing {range_start}-{range_end})."]
         if max_price is not None:
             lines.append(f"Price ceiling applied: ${max_price:.2f}.")
         if in_stock_only:
             lines.append("Only in-stock products are included.")
         lines.append(f"Top matches: {preview}.")
         lines.append("Tell me the product name if you want more details.")
+        next_offset = safe_offset + len(items)
 
         return ToolResponse.success(
             ai_text=" ".join(lines),
-            data={"category": resolved_category, "products": items},
+            data={
+                "category": resolved_category,
+                "products": items,
+                "pagination": {
+                    "offset": safe_offset,
+                    "limit": effective_limit,
+                    "next_offset": next_offset,
+                    "has_more": next_offset < len(total_items),
+                },
+            },
         )
     except Exception as e:
         log.error("search_categories_error", error=str(e))

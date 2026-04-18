@@ -13,6 +13,7 @@ from datetime import datetime
 import structlog
 from google import genai
 from google.genai import types
+from websockets.exceptions import ConnectionClosed
 
 from voice_commerce.core.tools import tool_registry   
 from voice_commerce.core.voice import audio_processor  
@@ -37,6 +38,7 @@ class GeminiLiveHandler:
         self._category_summary: CategorySummary = get_rag_service().category_summary
         self._category_summary_text = prompts.format_category_summary(self._category_summary)
         self._config = self._build_session_config()
+        self._session_closed = False
         log.info(
             "gemini_category_summary_loaded",
             category_count=len(self._category_summary),
@@ -120,14 +122,27 @@ class GeminiLiveHandler:
     @property
     def is_connected(self) -> bool:
         """True when the live Gemini session is ready to send/receive."""
-        return self._session is not None
+        return self._session is not None and not self._session_closed
+
+    def _mark_session_closed(self, reason: str) -> None:
+        """Mark the current live session as closed so later sends become no-ops."""
+        if not self._session_closed:
+            log.info("gemini_session_marked_closed", reason=reason)
+        self._session_closed = True
+
+    def _is_close_error(self, exc: Exception) -> bool:
+        """Return True for websocket/session shutdown errors we should treat as normal closure."""
+        if isinstance(exc, ConnectionClosed):
+            return True
+        error_msg = str(exc)
+        return any(token in error_msg for token in ("1011", "1000", "1001", "CANCELLED", "closed"))
          
     # =========================================================================
     # SENDING METHODS (App -> Gemini)
     # =========================================================================
     async def send_text(self, text: str) -> None:
         """Sends text to Gemini and yields response text as it arrives."""
-        if self._session is None:
+        if not self.is_connected:
             raise RuntimeError(
                 "Cannot send text: Gemini session is not connected. "
                 "Did you use 'async with handler.connect():'?"
@@ -135,14 +150,21 @@ class GeminiLiveHandler:
         
         log.debug("gemini_sending_text", text=text)
 
-        await self._session.send_client_content(
-            turns=types.Content(
-                role="user",
-                parts=[types.Part(text=text)]
-            ),
-            turn_complete=True, # turn_complete=True is the key flag that tells Gemini: "The user is done speaking, please respond now."
-            
-        )
+        try:
+            await self._session.send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[types.Part(text=text)]
+                ),
+                turn_complete=True, # turn_complete=True is the key flag that tells Gemini: "The user is done speaking, please respond now."
+                
+            )
+        except Exception as exc:
+            if self._is_close_error(exc):
+                self._mark_session_closed(f"send_text:{exc}")
+                log.info("gemini_send_text_skipped_closed_session", error=str(exc))
+                return
+            raise
 
 
     async def send_audio_chunk(self, pcm_bytes: bytes) -> None:
@@ -151,17 +173,24 @@ class GeminiLiveHandler:
         Uses send_realtime_input() not send_client_content() because audio is
         a continuous stream — Gemini's VAD detects speech pauses automatically.
         """
-        if self._session is None:
+        if not self.is_connected:
             raise RuntimeError("Cannot send audio: session not connected.")
         if not pcm_bytes:
             return  # skip empty chunks (can happen with some mic implementations)
 
-        await self._session.send_realtime_input(
-            audio=types.Blob(
-                data=pcm_bytes,
-                mime_type=f"audio/pcm;rate={audio_processor.MIC_SAMPLE_RATE}",
+        try:
+            await self._session.send_realtime_input(
+                audio=types.Blob(
+                    data=pcm_bytes,
+                    mime_type=f"audio/pcm;rate={audio_processor.MIC_SAMPLE_RATE}",
+                )
             )
-        )
+        except Exception as exc:
+            if self._is_close_error(exc):
+                self._mark_session_closed(f"send_audio_chunk:{exc}")
+                log.info("gemini_audio_chunk_dropped_closed_session", error=str(exc))
+                return
+            raise
 
 
     async def send_tool_result(self, call_id:   str | None, tool_name: str,result:    str) -> None:
@@ -180,25 +209,32 @@ class GeminiLiveHandler:
         natural speech. A structured readable string is ideal.
         """
 
-        if self._session is None:
+        if not self.is_connected:
             raise RuntimeError("Cannot send tool result: not connected.")
         log.debug("gemini_sending_tool_result",tool=tool_name, preview=result[:80])
 
-        await self._session.send_tool_response(
-            function_responses=[
-                types.FunctionResponse(
-                    id=call_id,  # correlate with the tool call
-                    name=tool_name,
-                    response={"result": result},
-                )
-            ],
-        )
+        try:
+            await self._session.send_tool_response(
+                function_responses=[
+                    types.FunctionResponse(
+                        id=call_id,  # correlate with the tool call
+                        name=tool_name,
+                        response={"result": result},
+                    )
+                ],
+            )
+        except Exception as exc:
+            if self._is_close_error(exc):
+                self._mark_session_closed(f"send_tool_result:{exc}")
+                log.info("gemini_tool_result_dropped_closed_session", tool=tool_name, error=str(exc))
+                return
+            raise
 
     async def inject_live_context(self, page: dict, products: list[dict]) -> None:
         """
         Silently updates Gemini's session memory with current page state.
         """
-        if self._session is None:
+        if not self.is_connected:
             return
 
         # Format the products for the AI
@@ -249,13 +285,20 @@ class GeminiLiveHandler:
         log.debug("gemini_injecting_context", items=len(products), filters=filters_text)
         log.info("gemini_injecting_context", context_msg=context_msg)
         # Send to Gemini using the exact types.Content formatting your file uses
-        await self._session.send_client_content(
-            turns=types.Content(
-                role="user",
-                parts=[types.Part(text=context_msg)]
-            ),
-            turn_complete=True,
-        )
+        try:
+            await self._session.send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[types.Part(text=context_msg)]
+                ),
+                turn_complete=True,
+            )
+        except Exception as exc:
+            if self._is_close_error(exc):
+                self._mark_session_closed(f"inject_live_context:{exc}")
+                log.info("gemini_context_injection_dropped_closed_session", error=str(exc))
+                return
+            raise
     # async def send_audio_stream_end(self) -> None:
     #     """
     #     Tell Gemini that the current user audio stream has ended.
@@ -379,12 +422,14 @@ class GeminiLiveHandler:
                 return
             # 2. Catch the 15-minute Timeout Hard-Kills (in case we miss the GoAway)
             if "1011" in error_msg or "CANCELLED" in error_msg:
+                self._mark_session_closed(error_msg)
                 log.warning("gemini_hard_timeout_reached", reason=error_msg)
                 yield {"type": "session_closed", "reason": "gemini_timeout"}
                 return
 
             # 3. Catch normal WebSocket closures
             if "1000" in error_msg or "1001" in error_msg:
+                self._mark_session_closed(error_msg)
                 log.info("gemini_session_closed_by_server", reason=error_msg)
                 yield {"type": "session_closed", "reason": "normal_closure"}
                 return
@@ -409,6 +454,7 @@ class GeminiLiveHandler:
 
         # Enter the context manager → opens the WebSocket to Gemini's servers
         self._session = await self._session_ctx.__aenter__()
+        self._session_closed = False
         log.info("gemini_session_connected")
         return self
     
@@ -428,6 +474,7 @@ class GeminiLiveHandler:
                 # Don't let cleanup errors mask the original exception
                 log.warning("gemini_session_close_error", error=str(e))
             finally:
+                self._session_closed = True
                 self._session = None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
                 self._session_ctx = None
  
