@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Commerce Agent — Demo Build Plan</title>
+<style>
+:root {
+  --bg: #0f1117; --bg2: #161b27; --bg3: #1e2536;
+  --border: #2a3347; --border2: #3d4f6e;
+  --text: #e8eaf0; --text2: #9ba8c0; --text3: #6272a4;
+  --blue: #5b7fff; --blue-bg: #1a2340; --blue-border: #2d3f6e;
+  --green: #50fa7b; --green-bg: #0d2616; --green-border: #1a4a2a;
+  --amber: #ffb86c; --amber-bg: #271d0a; --amber-border: #4a3510;
+  --red: #ff5555; --red-bg: #280d0d; --red-border: #4a1515;
+  --purple: #bd93f9; --purple-bg: #1e1532; --purple-border: #3d2560;
+  --teal: #8be9fd; --teal-bg: #0a2028; --teal-border: #154050;
+  --mono: 'Courier New', monospace;
+  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --radius: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--sans); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.7; }
+.wrap { max-width: 1000px; margin: 0 auto; padding: 48px 32px; }
+h1 { font-size: 26px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.subtitle { font-size: 14px; color: var(--text3); margin-bottom: 40px; }
+h2 { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--border); margin-top: 48px; }
+h3 { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 12px; }
+p { color: var(--text2); margin-bottom: 10px; font-size: 13px; }
+code { font-family: var(--mono); font-size: 11px; background: var(--bg3); padding: 1px 6px; border-radius: 3px; color: var(--teal); }
+.tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-right: 4px; }
+.tag-now    { background: var(--green-bg);  border: 1px solid var(--green-border);  color: var(--green); }
+.tag-later  { background: var(--amber-bg);  border: 1px solid var(--amber-border);  color: var(--amber); }
+.tag-skip   { background: var(--red-bg);    border: 1px solid var(--red-border);    color: var(--red); }
+.tag-xs { background: var(--teal-bg);   border: 1px solid var(--teal-border);   color: var(--teal); }
+.tag-s  { background: var(--blue-bg);   border: 1px solid var(--blue-border);   color: var(--blue); }
+.tag-m  { background: var(--purple-bg); border: 1px solid var(--purple-border); color: var(--purple); }
+.phase-block { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+.phase-header { padding: 16px 20px; background: var(--bg2); cursor: pointer; display: flex; align-items: center; gap: 12px; }
+.phase-badge { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.phase-title { font-size: 15px; font-weight: 600; }
+.phase-goal { font-size: 12px; color: var(--text3); margin-left: auto; }
+.phase-body { padding: 0 20px; }
+.part { border-top: 1px solid var(--border); padding: 18px 0; }
+.part-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.part-num { font-family: var(--mono); font-size: 11px; color: var(--text3); padding-top: 1px; flex-shrink: 0; min-width: 36px; }
+.part-title { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+.part-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.part-body { padding-left: 46px; }
+.what { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+.what-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.what-label.what-col { color: var(--blue); }
+.what-label.why-col  { color: var(--amber); }
+.what-label.file-col { color: var(--teal); }
+.what-label.learn-col { color: var(--purple); }
+.what p { margin-bottom: 0; font-size: 12px; }
+.file-list { font-family: var(--mono); font-size: 11px; color: var(--teal); line-height: 2; }
+.file-list span { color: var(--text3); font-size: 10px; font-family: var(--sans); margin-left: 8px; }
+.learn-box { background: var(--purple-bg); border: 1px solid var(--purple-border); border-radius: var(--radius); padding: 10px 14px; }
+.learn-box p { font-size: 12px; color: #c9b2f5; margin: 0; }
+.callout { border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px; font-size: 12px; }
+.callout.info  { background: var(--blue-bg);   border: 1px solid var(--blue-border);   color: #8faeff; border-left: 3px solid var(--blue); }
+.callout.warn  { background: var(--amber-bg);  border: 1px solid var(--amber-border);  color: #ffd4a0; border-left: 3px solid var(--amber); }
+.callout.green { background: var(--green-bg);  border: 1px solid var(--green-border);  color: #90ffa8; border-left: 3px solid var(--green); }
+.callout.red   { background: var(--red-bg);    border: 1px solid var(--red-border);    color: #ffaaaa; border-left: 3px solid var(--red); }
+.summary-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
+.summary-table th { text-align: left; padding: 8px 10px; color: var(--text3); border-bottom: 1px solid var(--border2); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.summary-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+.summary-table tr:last-child td { border-bottom: none; }
+.summary-table td:first-child { font-weight: 600; color: var(--text); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.summary-table td:nth-child(2) { color: var(--text2); }
+.summary-table td:last-child { white-space: nowrap; }
+ul { padding-left: 20px; margin-bottom: 8px; }
+ul li { color: var(--text2); font-size: 12px; line-height: 1.8; }
+strong { color: var(--text); }
+hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.toc { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 40px; }
+.toc h3 { color: var(--text3); margin-bottom: 12px; }
+.toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+.toc-item { font-size: 12px; color: var(--text2); padding: 4px 0; }
+.toc-item strong { color: var(--text); }
+@media (max-width: 600px) { .wrap { padding: 24px 16px; } .part-body { padding-left: 0; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Voice Commerce Agent — Demo Build Plan</h1>
+<p class="subtitle">Phase 10 · CV-ready demo · Do not start Phase 11 (Docker/Postgres) until this plan is fully complete.</p>
+
+<div class="callout green">
+  <strong>Rule:</strong> Each part is self-contained. Commit after each part. Test before the next. No combined commits across parts.
+</div>
+<div class="callout warn">
+  <strong>Scope lock:</strong> Memory compression, multi-user, database persistence, Shopify full-support, hybrid search, rate limiting — all postponed to Phase 11+. Do not touch them here.
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <h3>PLAN OVERVIEW — 5 PHASES, 19 PARTS</h3>
+  <div class="toc-grid">
+    <div class="toc-item"><strong>Phase 1</strong> — Core Experience (A, B)</div>
+    <div class="toc-item"><strong>Phase 2</strong> — Bug Sweep (A→F)</div>
+    <div class="toc-item"><strong>Phase 3</strong> — Highlight UX (A, B)</div>
+    <div class="toc-item"><strong>Phase 4</strong> — Search Quality (A→E)</div>
+    <div class="toc-item"><strong>Phase 5</strong> — Context & UX Polish (A→G)</div>
+  </div>
+</div>
+
+<!-- SUMMARY TABLE -->
+<h2>All Points — Priority Map</h2>
+<table class="summary-table">
+  <thead>
+    <tr><th>#</th><th>Point (from your notes + code review)</th><th>Phase / Part</th><th>Do Now?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>Proactive first message, good opening question</td><td>Phase 1A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>2</td><td>Human-friendly responses, no bot-isms, natural tone</td><td>Phase 1A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>3</td><td>Memory / sliding window / compression</td><td>—</td><td><span class="tag tag-skip">POSTPONE</span></td></tr>
+    <tr><td>4</td><td>Smart first dialogue, one clarifying question</td><td>Phase 1A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5a</td><td>search_categories tool (metadata + counts + samples)</td><td>Phase 4B</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5b</td><td>Category + price range filter on RAG search</td><td>Phase 4C</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5c</td><td>Categories dict built at startup from CSV → inject into prompt</td><td>Phase 1B + 4B</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5d</td><td>Pagination / "show me more" with offset</td><td>Phase 4D</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5e</td><td>Cache same query, dedupe → don't re-show same products</td><td>Phase 4D</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5f</td><td>Smart result count (Gemini can request N)</td><td>Phase 4D</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>5g</td><td>Fix tool registry descriptions + system prompt alignment</td><td>Phase 4E</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>6a</td><td>Parse page HTML properly for products</td><td>Phase 5B</td><td><span class="tag tag-later">LATER</span></td></tr>
+    <tr><td>6b</td><td>Format context cleanly and structured for Gemini</td><td>Phase 5B</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>6c</td><td>Send context only on mic-open or first text char (not on DOM events)</td><td>Phase 5B</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>6c-NEW</td><td><strong>Passive event tracking when agent is closed</strong> (filter, sort, navigate → event log → send on open)</td><td>Phase 5A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>6d</td><td>Dedupe context — don't resend if unchanged</td><td>Phase 5C</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>6e</td><td>Handle event types differently (sort = 1-line event not full dump)</td><td>Phase 5A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>6f</td><td>Don't fill Gemini history with repeated stale context</td><td>Phase 5C</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>7a</td><td>Cart works with CSV for demo (confirm end-to-end)</td><td>Phase 2A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>7b</td><td>Fix cart tool params / system prompt alignment</td><td>Phase 2A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>7c</td><td>Real cart sync — Gemini add must actually show in store cart UI</td><td>Phase 2C</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>7d</td><td>Inject current cart state when widget opens</td><td>Phase 5D</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>8a</td><td><strong>Highlight UX: sequential, staggered, duration, CSS effects, fading</strong></td><td>Phase 3A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>8b</td><td>Filter/sort to concentrate products on screen before highlighting</td><td>Phase 5F</td><td><span class="tag tag-later">LATER</span></td></tr>
+    <tr><td>8c</td><td>Transcript soft highlight (Gemini says name → faint glow)</td><td>Phase 3B</td><td><span class="tag tag-later">LATER</span></td></tr>
+    <tr><td>8d</td><td>Smart toasts — short, per-type duration</td><td>Phase 2D</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>8e</td><td>Filter / sort / search browser actions</td><td>Phase 5F</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>8f</td><td>When panel is closed: only mini event lines, not full context dump</td><td>Phase 5A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>NEW-A</td><td>Product modal: broken/placeholder images</td><td>Phase 2E</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>NEW-B</td><td>Product modal: details layout not well-displayed</td><td>Phase 2E</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>NEW-C</td><td>Product modal: "Add to cart" button doesn't work</td><td>Phase 2E</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>NEW-D</td><td>Product modal: timing — highlight effect THEN open modal (not simultaneous)</td><td>Phase 2F</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-1</td><td>Cart quantity += bug (replaces not increments)</td><td>Phase 2A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-2</td><td>Empty cart returns no cart_count → badge shows 1 instead of 0</td><td>Phase 2A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-3</td><td>audio_end handler commented out → 1s latency per reply</td><td>Phase 2B</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-4</td><td>Audio chunks &lt;64 bytes silently dropped</td><td>Phase 2B</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-5</td><td>to_embedding_text() dead code / two builders out of sync</td><td>Phase 4A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-6</td><td>HTML entities not decoded in embedding text</td><td>Phase 4A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-7</td><td>score_threshold=0.3 too loose</td><td>Phase 4A</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-8</td><td>Category filter advertised in tool but silently ignored</td><td>Phase 4C</td><td><span class="tag tag-now">NOW</span></td></tr>
+    <tr><td>CODE-9</td><td>`time` variable shadows `time` module in gemini_live_handler.py</td><td>Phase 1A</td><td><span class="tag tag-xs">5 min</span></td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- ════════════════════════════ PHASE 1 ════════════════════════════ -->
+<h2>Phase 1 — Core Experience</h2>
+<p>These two parts give the biggest perceived quality jump for the least effort. A viewer's first impression is formed in the first 10 seconds. Do this first.</p>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1a2340;color:#5b7fff">1A</div>
+    <div class="phase-title">Agent Identity + Store Context + Persona Polish</div>
+    <div class="phase-goal">First message quality · Agent feels like it belongs to this store</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">1A</div>
+        <div class="part-title">Rewrite system prompt: store identity, tone, rules, first-turn behavior</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO FIRST</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>Rewrite the system prompt in <code>gemini_live_handler.py</code> (lines 94–175). It currently gives Gemini no idea what store it works for. Add three new blocks:</p>
+          <ul>
+            <li><strong>Store Identity Block:</strong> name (NEXFIT), brand promise, product categories. This comes from a new <code>settings.store_name / store_tagline</code>, or better: built dynamically from the CSV at startup.</li>
+            <li><strong>Persona Block (tighten):</strong> shorter (1–2 sentences), warmer openers, natural human connectors ("Got it!", "Sure!", "Let me find that for you…"), no bullet points in voice replies, use hesitation sounds sparingly ("Hmm, let me check…").</li>
+            <li><strong>First-Turn Block:</strong> if transcript is empty, greet by store name + ask one specific question tied to the store's top categories. Not generic "how can I help?" — instead "We carry [Top 3 categories]. Are you looking for something specific or would you like to browse?"</li>
+            <li>Fix the <code>time</code> variable name collision (rename to <code>now_str</code> at line 275). This is a 5-second fix, do it here.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label why-col">WHY THIS MATTERS</div>
+          <p>Every demo viewer judges your project in the first 10 seconds. Currently Gemini says something generic because it doesn't know the store's identity. After this change, first message sounds like "Welcome to NEXFIT — we carry premium athletic apparel, footwear, and accessories. What are you looking for today?" — that is a completely different experience.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/voice/gemini_live_handler.py <span>system prompt (lines 94–175), time→now_str fix (line 275)</span><br>
+            src/voice_commerce/config/settings.py <span>add store_name, store_tagline (2 new fields with defaults)</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>A system prompt is not just instructions — it is the LLM's entire "world model" at session start. Everything Gemini knows about the context comes from here (plus tool results). A bad system prompt makes every downstream interaction worse. The key skill: write prompts that are <em>specific without being verbose</em>. "When the user says 'the first one', check the numbered list in the latest context injection" is better than 2 paragraphs of vague instruction.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">1B</div>
+        <div class="part-title">Build categories summary dict at startup and inject into prompt</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO FIRST</span>
+          <span class="tag tag-s">~1h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>In <code>rag_service.py</code> (or a new tiny helper), after the CSV loads at startup, build a categories summary: scan all products, group by top-level category name, count products per category, pull 1–2 product name examples per category. Shape: <code>{"Hoodies": {"count": 23, "examples": ["Champion Reverse Weave", "Grayson Crewneck"]}}</code>. Store this as <code>rag_service.category_summary</code>. In <code>gemini_live_handler.py</code>, call <code>get_rag_service().category_summary</code> once at session init and embed the result into the Store Identity Block of the system prompt.</p>
+        </div>
+        <div class="what">
+          <div class="what-label why-col">WHY THIS MATTERS</div>
+          <p>Gemini currently has to <em>discover</em> your categories by calling search tools blindly. After this, the system prompt already says "We have: Hoodies (23 products), Jeans (14), Jackets (11), Activewear (8)…". This makes the first-turn question specific, makes the agent sound knowledgeable, and reduces tool-call overhead for basic browsing questions.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/services/rag_service.py <span>add category_summary property, built after CSV sync</span><br>
+            src/voice_commerce/core/voice/gemini_live_handler.py <span>read category_summary, embed in Store Identity Block</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>This is called "static knowledge injection" — facts that are true for the whole session (the catalog's category structure) are injected once at session start, not re-sent on every turn. Compare this to "dynamic context injection" in Phase 5, which sends real-time page state. Always ask: "Is this fact static (inject at start) or dynamic (inject when it changes)?" Confusing the two wastes tokens and confuses the model.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ PHASE 2 ════════════════════════════ -->
+<h2>Phase 2 — Bug Sweep</h2>
+<p>Fixes that will show up as visible glitches on camera. Each sub-part is tiny. The cart sync (2C) is the most involved but the most important for demo credibility.</p>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0d2616;color:#50fa7b">2A</div>
+    <div class="phase-title">Cart Backend Bug Fixes</div>
+    <div class="phase-goal">Cart quantity, empty-cart badge, tool param alignment</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">2A</div>
+        <div class="part-title">Three cart bugs: quantity increment, empty badge, tool params</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-xs">~30 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">BUG 1 — Quantity replaces instead of increments</div>
+          <p><code>cart_tools.py line 74</code>: <code>cart.items[product_id].quantity = quantity</code> → should be <code>+= quantity</code>. When user says "add another one," the count resets to 1. Breaks on camera the moment someone says "I want 2 of those."</p>
+        </div>
+        <div class="what">
+          <div class="what-label what-col">BUG 2 — Empty cart badge shows 1 instead of 0</div>
+          <p><code>cart_tools.py lines 137–138</code>: When the last item is removed, the success response has no <code>data</code> dict. <code>action_dispatcher._on_remove_from_cart</code> does <code>tool_result.get("cart_count", 1)</code> — so badge shows 1. Fix: include <code>data={"cart_count": 0}</code> in the success response when cart becomes empty.</p>
+        </div>
+        <div class="what">
+          <div class="what-label what-col">BUG 3 — Tool registry system-prompt misalignment</div>
+          <p>The <code>add_to_cart</code> tool description in <code>tool_registry.py</code> says Gemini should pass <code>product_id</code> (integer) but occasionally Gemini passes name strings. Add explicit instructions: "product_id must be the integer ID returned by search_products. Never invent or guess an ID." Also add an example to the description.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/tools/cart_tools.py <span>line 74 (+= fix), lines 137–148 (empty cart data fix)</span><br>
+            src/voice_commerce/core/tools/tool_registry.py <span>add_to_cart description: explicit ID type + example</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>The <code>=</code> vs <code>+=</code> bug is a classic "replace vs accumulate" mistake — appears when you write a function that handles both "first add" and "update" in one branch. The discipline: when mutating existing state, always ask "should this overwrite or accumulate?" For cart quantities, it's always accumulate. For cart item metadata (name, price), it's always overwrite. Write the logic to match the real-world intent, not the simplest expression.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0a2028;color:#8be9fd">2B</div>
+    <div class="phase-title">Audio Latency Fixes</div>
+    <div class="phase-goal">Remove ~1 second from every reply · Fix dropped audio</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">2B</div>
+        <div class="part-title">Wire audio_end signal + remove 64-byte drop</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-xs">~20 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">FIX 1 — Wire audio_end signal</div>
+          <p><code>voice_websocket_handler.py lines 199–201</code> has the handler commented out. When the user stops recording, <code>widget.js line 1359</code> sends <code>{type: "audio_end"}</code>, but the backend ignores it. Gemini then waits for its internal Voice Activity Detection (~1 second timeout) before replying. Uncommenting and calling <code>gemini.send_audio_stream_end()</code> removes this delay entirely — every reply becomes instant after user stops speaking.</p>
+        </div>
+        <div class="what">
+          <div class="what-label what-col">FIX 2 — Remove 64-byte drop filter</div>
+          <p><code>voice_websocket_handler.py lines 181–183</code> silently drops audio packets smaller than 64 bytes. This can clip the very start of a user's speech. Gemini's VAD is better at deciding what's silence — remove this filter and let Gemini handle it.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/handlers/voice_websocket_handler.py <span>uncomment lines 199–201 (audio_end handler), remove lines 181–183 (size filter)</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>VAD (Voice Activity Detection) is the mechanism that detects when a speaker has stopped talking. Gemini has built-in VAD (~800ms–1s timeout) but it only fires if you never tell it explicitly that speech ended. <code>send_audio_stream_end()</code> is a signal that says "I'm done talking, you can reply now." This is the correct production pattern — the application knows speech ended (user released the button) before any VAD model does. Always use explicit signals over timeouts when you have them.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#280d0d;color:#ff5555">2C</div>
+    <div class="phase-title">Real Cart Sync — Most Important Demo Fix</div>
+    <div class="phase-goal">When Gemini says "added to cart", the store cart actually contains the product</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">2C</div>
+        <div class="part-title">Add AddToRealCart browser action + widget.js real AJAX call</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-m">~2.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="callout warn">
+          <strong>The real bug:</strong> Python's <code>_CARTS</code> dict is a "shadow cart" — it tracks what was said, but never tells the browser to actually add anything to WooCommerce. The badge number updates (via <code>UpdateCartBadge</code>), but the real store cart stays empty. When the user opens the cart drawer they see nothing. When they manually click "Add to Cart" it works perfectly, because that uses the real WooCommerce AJAX endpoint.
+        </div>
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>New browser action:</strong> Add <code>AddToRealCart</code> to <code>browser_actions.py</code> with fields <code>product_id: int</code>, <code>quantity: int</code>.</li>
+            <li><strong>Action dispatcher:</strong> In <code>_on_add_to_cart()</code>, append the new <code>AddToRealCart</code> action to the returned actions list.</li>
+            <li><strong>widget.js — WooCommerce adapter:</strong> Handle <code>add_to_real_cart</code> action by making the real WooCommerce AJAX call: <code>POST</code> to <code>/?wc-ajax=add_to_cart</code> with <code>product_id</code> and <code>quantity</code>. On success, trigger <code>wc_fragment_refresh</code> so WooCommerce redraws the cart.</li>
+            <li><strong>widget.js — embed_demo.html adapter:</strong> The demo page has its own simple JS cart. Handle <code>add_to_real_cart</code> by calling a custom event or function the demo page exposes (e.g., <code>window.dispatchEvent(new CustomEvent('vc:addToCart', {detail: {id, qty}}))</code>). <code>embed_demo.html</code> listens for this and adds the product to its visual cart drawer with real product data.</li>
+            <li><strong>embed_demo.html:</strong> Implement a real JS cart that stores items, renders them in the cart drawer with image/name/price, shows total. Currently the drawer is visual-only with no items.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label why-col">WHY THIS MATTERS</div>
+          <p>This is the most damaging demo bug. The user hears "Done! I've added the Nike shoes to your cart" and then opens the cart and it's empty. That destroys trust in the entire demo. This is the one fix that makes the demo believable as a real product.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/actions/browser_actions.py <span>add AddToRealCart model + to BrowserAction union</span><br>
+            src/voice_commerce/core/actions/action_dispatcher.py <span>_on_add_to_cart: append AddToRealCart action</span><br>
+            static/widget.js <span>handle add_to_real_cart in _onAction → WooCommerce AJAX call + emit event</span><br>
+            static/embed_demo.html <span>listen for vc:addToCart event, render items in cart drawer</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>This illustrates a common architecture pattern: a backend "logical model" (what the AI knows about the cart) vs a frontend "view model" (what the real store shows). Both need to stay in sync. The backend cart is valuable for conversation context (Gemini knows "you have 3 items"), but it cannot substitute for the real store interaction. The bridge is a browser action that tells the front-end: "this decision was made — now execute it in your real system." This is the Command pattern in event-driven architecture.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#271d0a;color:#ffb86c">2D</div>
+    <div class="phase-title">Toast / Notification Polish</div>
+    <div class="phase-goal">Messages feel intentional, not noisy</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">2D</div>
+        <div class="part-title">Tiered toast durations + short copy + better positioning</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-xs">~30 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>Duration tiers in widget.js:</strong> <code>info</code> = 1,500ms, <code>success</code> = 2,500ms, <code>warning</code> = 3,500ms, <code>error</code> = 5,000ms.</li>
+            <li><strong>Max toast copy:</strong> enforce 1-line max in <code>action_dispatcher.py</code> notify messages. Example: "✓ Nike Air Max added" not "I have successfully added the Nike Air Max 270 to your shopping cart."</li>
+            <li><strong>Stack max 2 toasts:</strong> if a 3rd toast arrives before previous fade, remove the oldest. Prevents toast avalanche during rapid tool calls.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            static/widget.js <span>_showToast function — duration logic, max stack</span><br>
+            src/voice_commerce/core/actions/action_dispatcher.py <span>shorten all notify() message strings to 1 line</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Toasts are micro-feedback mechanisms — they should confirm an action happened, not describe it. If the toast says the same thing Gemini just said aloud, it's redundant noise. Design rule: the voice confirms, the toast reinforces. Keep them short, fast, and visual. Duration should match urgency: errors need time to read, successes can vanish quickly.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1e1532;color:#bd93f9">2E</div>
+    <div class="phase-title">Product Modal Fixes</div>
+    <div class="phase-goal">Images load correctly, details look polished, Add to Cart works</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">2E</div>
+        <div class="part-title">Modal image, layout, and Add-to-Cart button</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">FIX 1 — Broken / placeholder images</div>
+          <p>The <code>ShowProductModal</code> action in <code>action_dispatcher.py</code> currently sends only <code>product_id</code> and <code>product_name</code>. Widget.js tries to scrape the image from the DOM (via <code>_store.findProduct(productId)</code>) — but if the product isn't visible on screen, no image is found. Fix: pass <code>product_data</code> (a dict with <code>thumbnail</code>, <code>price</code>, <code>short_desc</code>) directly in the action. Get these fields from the <code>Product</code> object that <code>product_tools.get_product_details()</code> already has.</p>
+        </div>
+        <div class="what">
+          <div class="what-label what-col">FIX 2 — Modal layout improvements</div>
+          <p>Current modal HTML is minimal. Improve in <code>widget.js _doShowProductModal</code>: image on top (max-height: 200px, object-fit: cover), product name as large heading, price in accent color, short description in muted text, category tag pill, then action buttons. Add a "View on page" link that scrolls to the product and closes the modal.</p>
+        </div>
+        <div class="what">
+          <div class="what-label what-col">FIX 3 — Add to Cart button</div>
+          <p>Currently it sends a text message <code>"Add product 17 to my cart"</code> back to the AI. This is fine conceptually (keeps AI in the loop), but there's a UX issue: the modal closes immediately, and then there's a delay while Gemini processes and responds. Better: close modal → immediately dispatch <code>AddToRealCart</code> action directly from the button onclick (bypass Gemini for this action) AND send Gemini a text message so it acknowledges. This way the store cart updates instantly and Gemini's confirmation follows ~1 second later.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/actions/action_dispatcher.py <span>_on_get_product_details: include product_data in ShowProductModal action</span><br>
+            src/voice_commerce/core/actions/browser_actions.py <span>ShowProductModal: add optional product_data field</span><br>
+            static/widget.js <span>_doShowProductModal: better layout HTML/CSS, fix add button behavior</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Never rely on scraping the live DOM for data you already have on the server. The server knows the product's image URL from the CSV. The browser might not have the product visible (it could be on page 3). Pass all necessary display data inside the action payload. This is "data locality" — the data should travel with the event that needs it. The server is the source of truth; the DOM is just a rendering surface.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1a2340;color:#5b7fff">2F</div>
+    <div class="phase-title">Product Modal Animation Timing</div>
+    <div class="phase-goal">Highlight effect → fade → THEN modal opens (sequential, not simultaneous)</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">2F</div>
+        <div class="part-title">Sequence: highlight product with blur → fade out → open modal</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>Currently in <code>action_dispatcher._on_get_product_details()</code>, three actions are sent simultaneously: <code>ShowProductModal</code>, <code>HighlightProduct</code>, and the backdrop blur. They all arrive at the browser at the same time and trigger at once.</p>
+          <p>The correct sequence you described:</p>
+          <ul>
+            <li><strong>Step 1 (0ms):</strong> Apply backdrop blur/dim on all other products + bright highlight ring on the target product. Let this sit for ~600ms so viewer can see it.</li>
+            <li><strong>Step 2 (600ms):</strong> Fade the highlight ring out smoothly (~300ms).</li>
+            <li><strong>Step 3 (900ms):</strong> Open the product modal with a slide-in animation.</li>
+          </ul>
+          <p>Implementation: send the highlight action first. In <code>widget.js</code>, when a <code>show_product_modal</code> action arrives, check if there's an active highlight — if yes, wait for the highlight CSS animation to complete (<code>transitionend</code> or a fixed <code>setTimeout</code>), then open the modal. The <code>delay_ms</code> field can be added to <code>ShowProductModal</code> to let the server control the timing.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/actions/browser_actions.py <span>add delay_ms field to ShowProductModal</span><br>
+            src/voice_commerce/core/actions/action_dispatcher.py <span>_on_get_product_details: set delay_ms=900 on modal action</span><br>
+            static/widget.js <span>_onAction: for show_product_modal, use setTimeout(delay_ms) before calling _doShowProductModal</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Sequence vs simultaneity is a core UI animation concept. When multiple things happen at once they compete for attention and look chaotic. When they're sequenced (A then B then C) the user's eye is guided — they see A, then B, then C. The server controls the intent (what should happen); the widget controls the execution (when and how fast). Separating these concerns (intent in Python, timing in JS) keeps your Python clean while letting the UI be as polished as needed.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ PHASE 3 ════════════════════════════ -->
+<h2>Phase 3 — Highlight UX (The Wow Visual)</h2>
+<p>Your highlight system is currently functional but visually flat. This is the moment that makes a demo memorable on camera. When search returns 4 products and they sequentially glow 1→2→3→4 with a ripple effect, with the previous ones holding a soft glow — it looks deliberate, intelligent, and impressive.</p>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1e1532;color:#bd93f9">3A</div>
+    <div class="phase-title">Sequential Staggered Highlight System</div>
+    <div class="phase-goal">Products glow in order · Smooth transitions · Lingering shadows · Auto-fade</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">3A</div>
+        <div class="part-title">Full highlight UX: CSS effects, sequential order, stagger timing, dual-state glow</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-m">~2.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE — The full sequence behavior</div>
+          <p>When <code>search_products</code> returns N results, the dispatcher sends N <code>HighlightProduct</code> actions. Each action now carries:</p>
+          <ul>
+            <li><code>delay_ms</code>: stagger offset (item 1=0, item 2=350ms, item 3=700ms, item 4=1050ms)</li>
+            <li><code>intensity</code>: <code>"primary"</code> (bright pulse, this item is highlighted now) or <code>"secondary"</code> (soft lingering glow, already highlighted)</li>
+            <li><code>auto_fade_ms</code>: total duration before full fade (e.g., 8000ms for all highlights to go out)</li>
+          </ul>
+          <p><strong>CSS states to implement:</strong></p>
+          <ul>
+            <li><code>.vc-highlight-primary</code>: bright ring (e.g., 3px solid accent color), pulse animation, slight scale-up (1.02), elevated box-shadow, z-index raised</li>
+            <li><code>.vc-highlight-secondary</code>: soft glow only, no pulse, no scale, just 1px ring + faint box-shadow — shows "this was a result too"</li>
+            <li>Transition from primary→secondary at ~2 seconds after activation</li>
+            <li>Full fade to clean at <code>auto_fade_ms</code></li>
+          </ul>
+          <p><strong>Scroll behavior:</strong> Only the first item scrolls. Items 2+ highlight in place without scrolling (they may already be in view or user can see them without movement).</p>
+          <p><strong>ClearHighlights at start of each search:</strong> On new search, instantly remove all highlight classes before starting the new sequence.</p>
+        </div>
+        <div class="what">
+          <div class="what-label why-col">WHY THIS MATTERS</div>
+          <p>This is the visual proof that the AI is looking at the same page as the user. The sequential reveal (not all at once) communicates "I found these, in this order." The lingering secondary glow communicates "these are all part of the result set." The auto-fade communicates "I'm done, the page is back to normal." Each visual behavior has a semantic meaning — it tells a story without words.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/actions/browser_actions.py <span>add delay_ms, intensity, auto_fade_ms fields to HighlightProduct</span><br>
+            src/voice_commerce/core/actions/action_dispatcher.py <span>_on_search_products: generate staggered highlights with delay_ms per item</span><br>
+            static/widget.js <span>_doHighlightProduct: apply delay via setTimeout, CSS class management, transition logic, auto-fade timer</span><br>
+            static/widget.js (CSS section) <span>add .vc-highlight-primary, .vc-highlight-secondary, @keyframes vc-pulse animations</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>CSS <code>@keyframes</code> animations + JavaScript <code>setTimeout</code> is the right split here. CSS handles <em>how</em> something looks during the animation (smooth, GPU-accelerated). JavaScript handles <em>when</em> the animation starts (the stagger delay) and <em>when</em> to switch states (primary→secondary→fade). Never put timing logic in CSS variables if you need to control it from JS — instead, use JS to add/remove classes and let CSS transitions handle the visual.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">3B</div>
+        <div class="part-title">Transcript-based soft highlight (optional if time allows)</div>
+        <div class="part-tags">
+          <span class="tag tag-later">OPTIONAL</span>
+          <span class="tag tag-m">~2h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>When Gemini's transcript text mentions a specific product name (e.g., "The Champion Hoodie is a great choice"), the widget detects the product name in the transcript and applies a very soft <code>.vc-highlight-secondary</code> glow on that card — without scroll, without pulse. This makes the agent feel like it's pointing at things while talking.</p>
+          <p>Implementation: backend sends transcript chunks as <code>{type: "transcript", role: "assistant", text: "..."}</code>. The backend (in <code>gemini_to_browser</code>) checks if the current transcript chunk contains any product name from the last search results and sends an additional lightweight highlight action alongside the transcript. <strong>Only trigger for the last search results — don't match against full catalog.</strong></p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/handlers/voice_websocket_handler.py <span>in gemini_to_browser: if transcript chunk contains known product name, append soft highlight action</span><br>
+            static/widget.js <span>handle secondary highlight via transcript — already handled in 3A's CSS</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ PHASE 4 ════════════════════════════ -->
+<h2>Phase 4 — Search Quality</h2>
+<p>The search is the product. Currently it works but has dead code, a loose threshold, and no way to get "more results" or filter by real category. This phase makes search feel genuinely smart.</p>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0d2616;color:#50fa7b">4A</div>
+    <div class="phase-title">Unify Embedding Text + Quality Fixes</div>
+    <div class="phase-goal">Single builder · Better semantic content · Tighter threshold</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">4A</div>
+        <div class="part-title">Delete dead code, fix entities, include short_desc, raise threshold to 0.5</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>Single embedding builder:</strong> <code>Product.to_embedding_text()</code> in <code>models/product.py</code> is defined but never called — <code>rag_service._build_rich_text()</code> is what actually runs. Delete <code>_build_rich_text()</code> and make <code>rag_service</code> call <code>product.to_embedding_text()</code>. One place, one version, no drift.</li>
+            <li><strong>Include short_description:</strong> Add it to <code>to_embedding_text()</code>. The CSV has it (e.g., "Classic hoodie with a relaxed fit") and it's semantically dense in 10 words.</li>
+            <li><strong>Decode HTML entities:</strong> In <code>to_embedding_text()</code>, run <code>html.unescape(description)</code> before the regex strip. Fixes <code>&amp;ndash;</code> → <code>—</code>, <code>&amp;amp;</code> → <code>&amp;</code>, etc. These literal entity strings corrupt the embedding's semantic meaning.</li>
+            <li><strong>Raise threshold:</strong> <code>vector_store.py line 151</code>: change <code>score_threshold=0.3</code> to <code>0.45</code>. On a 250-product catalog, 0.3 is too loose and returns semantically unrelated products.</li>
+            <li><strong>Re-sync on next server start:</strong> After changing the embedding text, the existing Qdrant vectors are stale. The RAG service re-syncs on startup anyway (it's in <code>lifespan</code>), so the fix is automatic — just restart the server after the change.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/models/product.py <span>to_embedding_text(): add short_desc, html.unescape</span><br>
+            src/voice_commerce/services/rag_service.py <span>replace _build_rich_text() call with product.to_embedding_text()</span><br>
+            src/voice_commerce/core/rag/vector_store.py <span>score_threshold: 0.3 → 0.45</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>"Garbage in, garbage out" is especially true for embeddings. The embedding model encodes text into a 384-dimensional vector that represents the text's meaning in geometric space. If your text says <code>&amp;ndash;</code> instead of <code>—</code>, the model sees a weird string instead of a dash. When a user searches "wireless noise–canceling headphones," the query embedding and the product embedding won't align well because the product text had corrupted punctuation. The fix is cheap; the impact on search quality is significant.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0a2028;color:#8be9fd">4B</div>
+    <div class="phase-title">search_categories Tool</div>
+    <div class="phase-goal">Agent can answer "what do you have?" without guessing</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">4B</div>
+        <div class="part-title">Build categories summary at startup + new search_categories tool</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>RagService.category_summary:</strong> After CSV loads, build a dict: <code>{"Hoodies": {"count": 18, "samples": ["Champion Reverse Weave", "Grayson Crewneck"]}, "Jeans": {...}}</code></li>
+            <li><strong>New tool <code>search_categories</code>:</strong> Accepts optional keyword. Returns matching categories + counts + sample product names. Cheap call — no Qdrant, just the in-memory dict. Perfect for "what do you carry in jackets?" or "what categories do you have?"</li>
+            <li><strong>Register in tool_registry.py + tool_dispatcher.py</strong></li>
+            <li><strong>Description for Gemini:</strong> "Returns available product categories and how many products are in each. Call this when the user asks what the store carries, what categories exist, or asks a broad question before knowing which product to search for."</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/services/rag_service.py <span>add category_summary property (built after sync)</span><br>
+            src/voice_commerce/core/tools/product_tools.py <span>add search_categories() async function</span><br>
+            src/voice_commerce/core/tools/tool_registry.py <span>declare search_categories schema</span><br>
+            src/voice_commerce/core/tools/tool_dispatcher.py <span>register name → function mapping</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Tools should be specialized by query type. <code>search_products</code> is expensive (embedding + vector search). <code>search_categories</code> is free (in-memory dict lookup). When the user asks "what do you have?", calling <code>search_products(query="everything")</code> would waste 50–200ms on an embedding call just to return a random 5 products. The right tool is the cheap, purpose-built one. This is the "don't use a hammer for a screw" principle in API design.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1a2340;color:#5b7fff">4C</div>
+    <div class="phase-title">Fix Category Filter (Remove the Lie)</div>
+    <div class="phase-goal">Tool schema no longer advertises filtering that silently doesn't work</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">4C</div>
+        <div class="part-title">Implement real category filter in Qdrant OR remove from tool schema</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="callout warn">
+          <strong>The current bug:</strong> <code>tool_registry.py</code> tells Gemini that <code>search_products</code> accepts a <code>category</code> parameter and filters by it. In reality, <code>vector_store.py</code> ignores this parameter entirely. Gemini calls <code>search_products(query="shoes", category="Athletic")</code> expecting filtered results, gets unfiltered results, and has no way to know why. This silently breaks the search quality.
+        </div>
+        <div class="what">
+          <div class="what-label what-col">TWO OPTIONS — pick one</div>
+          <p><strong>Option A (recommended for demo — 30 min):</strong> Remove <code>category</code> from the <code>search_products</code> tool schema. Let the new <code>search_categories</code> tool handle category browsing. Semantic search handles the rest. Clean and honest.</p>
+          <p><strong>Option B (better long-term — 1.5h):</strong> Implement it properly. In <code>csv_client.py</code>, sanitize category slugs (lowercase, strip <code>&amp;</code>, spaces → <code>-</code>). In <code>vector_store.py</code>, add a Qdrant <code>FieldCondition</code> on <code>categories[].name</code>. This makes real filtered search work.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE (Option A)</div>
+          <div class="file-list">
+            src/voice_commerce/core/tools/tool_registry.py <span>remove category parameter from search_products schema</span><br>
+            src/voice_commerce/core/tools/product_tools.py <span>remove category param from function signature</span>
+          </div>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE (Option B, adds to above)</div>
+          <div class="file-list">
+            src/voice_commerce/services/csv_client.py <span>sanitize category slug on parse</span><br>
+            src/voice_commerce/core/rag/vector_store.py <span>add FieldCondition for category filter</span><br>
+            src/voice_commerce/services/rag_service.py <span>pass category through to vector_store.search_products</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>"Don't lie to your LLM" is a practical engineering rule. Gemini makes decisions based on the tool descriptions you give it. If a description says a parameter does something it doesn't, the LLM calls the tool expecting behavior that never happens — and it receives results it cannot explain. This causes the LLM to either repeat the tool call (wasting turns) or give the user incorrect information. Always keep tool descriptions exactly aligned with what the code actually does.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#271d0a;color:#ffb86c">4D</div>
+    <div class="phase-title">Pagination / "Show Me More"</div>
+    <div class="phase-goal">User can say "show me more" and get the next batch of results</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">4D</div>
+        <div class="part-title">offset + limit params + per-session query cache to avoid duplicates</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>Add <code>limit</code> and <code>offset</code> to <code>search_products</code> tool:</strong> Default <code>limit=5</code>, <code>offset=0</code>. Gemini can request more by passing <code>offset=5</code>.</li>
+            <li><strong>Per-session query result cache:</strong> In <code>product_tools.py</code>, keep a small dict keyed by <code>(session_id, query_hash)</code> storing the IDs of already-returned products. On each call with same query, exclude those IDs from results (or use <code>offset</code> to skip them in Qdrant). This prevents "show me more" from returning the same 5 products again.</li>
+            <li><strong>Tool description update:</strong> Tell Gemini: "If the user says 'show me more', 'what else', or 'anything else', call this tool again with <code>offset</code> = (previous offset + previous limit)."</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/tools/product_tools.py <span>add limit/offset params, session query cache dict</span><br>
+            src/voice_commerce/core/tools/tool_registry.py <span>update search_products schema + description</span><br>
+            src/voice_commerce/core/rag/vector_store.py <span>pass limit to Qdrant query (already has limit param, just expose it)</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Pagination via <code>offset</code> is standard in every search API (Google: <code>start=10</code>, Elasticsearch: <code>from=10</code>, Qdrant: <code>offset=10</code>). The pattern: you return N results starting from position <code>offset</code>. On "show me more", increment offset by N. The per-session cache is an extra guard: even if Qdrant returns slightly different results on a repeat query (due to ANN approximation), you've already filtered out seen IDs. This makes the user experience smooth even if the underlying similarity scores fluctuate.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1e1532;color:#bd93f9">4E</div>
+    <div class="phase-title">Tool Registry Description Improvements</div>
+    <div class="phase-goal">Gemini calls the right tool at the right time</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">4E</div>
+        <div class="part-title">Rewrite all tool descriptions with specific triggers + examples</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-xs">~45 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>For each tool, the description must answer: <em>when specifically should I call this?</em> and ideally include one example input.</p>
+          <ul>
+            <li><strong>search_categories:</strong> "Call this when the user asks what the store sells, what categories exist, or asks a general browsing question before knowing what product to search for. Example: 'what do you have?', 'show me your collections'."</li>
+            <li><strong>search_products:</strong> "Call this when the user wants to find specific products by description, type, feature, or price. Call with offset=5 if the user asks for more results. Example: 'show me running shoes under $100'."</li>
+            <li><strong>get_product_details:</strong> "Call this to show full details about a specific product by ID. Only call when you have a valid integer product_id from a previous search_products call. Never guess an ID."</li>
+            <li><strong>add_to_cart:</strong> "Call this only when the user explicitly confirms they want to add a specific product. The product_id must be an integer from a previous search. Never add to cart without user confirmation."</li>
+            <li><strong>show_cart:</strong> "Call this when the user asks about their cart, current items, or total. No parameters needed."</li>
+            <li><strong>remove_from_cart:</strong> "Call this only when the user explicitly says to remove a specific product they've previously added."</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/tools/tool_registry.py <span>rewrite description strings for all 6 tools</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>A tool description is essentially a decision rule in English. The LLM reads it and decides: "is now the right time to call this?" Vague descriptions lead to over-triggering (agent calls search on every message) or under-triggering (agent never calls the right tool). Good descriptions include: what the tool does, when to call it, when NOT to call it, and an example. The "never guess an ID" instruction prevents the #1 tool failure mode: hallucinated product IDs that cause lookup errors.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ PHASE 5 ════════════════════════════ -->
+<h2>Phase 5 — Context &amp; UX Polish</h2>
+<p>Makes the agent feel aware, alive, and helpful even before the user opens it. Also adds the visual polish layer (onboarding, filter actions).</p>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0a2028;color:#8be9fd">5A</div>
+    <div class="phase-title">Passive Event Tracking (Agent Closed)</div>
+    <div class="phase-goal">Agent knows what user did before opening it</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5A</div>
+        <div class="part-title">Queue lightweight user events when agent is closed → flush on open/mic/text</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~2h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="callout info">
+          <strong>Your new point:</strong> When the voice agent is closed, the user may be browsing: applying filters, sorting products, navigating to a new page. We don't send full page context (no WebSocket connection or agent is paused), but we can queue small event lines in memory. When the agent opens (or user starts mic/types), we send those queued events + the current page state. The agent then knows "the user filtered to Men's, sorted by price low-to-high, then opened you."
+        </div>
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>widget.js — event queue:</strong> Add <code>STATE.eventQueue = []</code>. Listen for DOM mutations/events on filter buttons, sort dropdowns, URL changes (popstate), price range inputs — even when the panel is closed. On each event, push a one-line string: <code>"User filtered: category=Men"</code>, <code>"User sorted: price asc"</code>, <code>"User navigated: /shop/hoodies"</code>, <code>"User set price range: $50–$300"</code>. Max queue: last 10 events.</li>
+            <li><strong>Flush on connection:</strong> When WebSocket connects (on panel open, mic start, or first text), include <code>STATE.eventQueue</code> in the first context message, then clear the queue.</li>
+            <li><strong>Also flush immediately when user starts mic or sends text:</strong> Before sending audio/text, check if queue is non-empty → send as a <code>context_update</code> message first, then the audio/text. This ensures Gemini has the context before the user's first word.</li>
+            <li><strong>Backend — new context field:</strong> <code>voice_websocket_handler.py</code> receives <code>context_update</code> with a new <code>events</code> list. Pass to <code>gemini.inject_live_context(events=events, ...)</code> and include in the formatted context message.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label why-col">WHY THIS MATTERS</div>
+          <p>Without this, the agent has no idea what the user was doing before opening the widget. The user might have spent 2 minutes browsing hoodies, applied a price filter, and then asks "what do you think?" — and the agent starts from scratch. With the event queue, Gemini knows exactly where the user was in their journey. This makes the agent feel contextually aware instead of amnesiac.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            static/widget.js <span>STATE.eventQueue, DOM event listeners (even when panel is closed), flush logic on connect/mic/text</span><br>
+            static/embed_demo.html <span>emit filter/sort/navigation DOM events that widget.js can intercept</span><br>
+            src/voice_commerce/handlers/voice_websocket_handler.py <span>handle events field in context_update message</span><br>
+            src/voice_commerce/core/voice/gemini_live_handler.py <span>inject_live_context: include events list in formatted message</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>This is the "event sourcing" pattern — instead of storing state (full page snapshot), you store what happened (event log). The event log is lightweight (10 text strings), interpretable (Gemini reads English), and gapless (even if the page changed 5 times while the agent was closed, you have a record). Full page state is complementary — you send both: "here's what happened" + "here's what it looks like now." One answers "how did we get here?" the other answers "what do we see now?"</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#271d0a;color:#ffb86c">5B</div>
+    <div class="phase-title">Smart Context Injection (Trigger + Format)</div>
+    <div class="phase-goal">Context goes to Gemini at the right moment in a clean format</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5B</div>
+        <div class="part-title">Send context on mic-open or first text char only (not DOM events)</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>Remove DOM-event-triggered context injection:</strong> Currently widget.js fires <code>_injectPageContext()</code> on various events (scroll, filter, navigation). Stop this. Page context will only be sent when the user is about to communicate.</li>
+            <li><strong>Inject on: mic button press:</strong> Before starting the audio stream, send the latest page state + event queue. Gemini gets the context while user is still starting to speak.</li>
+            <li><strong>Inject on: first character typed:</strong> When user starts typing in the text input (not on every keystroke — once per typing session), send context. This ensures text messages always arrive with fresh context.</li>
+            <li><strong>On reconnect:</strong> Send context immediately after WebSocket connects.</li>
+            <li><strong>Context format improvement:</strong> The formatted context in <code>gemini_live_handler.inject_live_context</code> should use a clean structure:<br>
+              <code>--- CONTEXT UPDATE ({time}) ---</code><br>
+              <code>Page: /shop/hoodies</code><br>
+              <code>Active Filters: Category=Men, Price=$50–$300</code><br>
+              <code>Cart: 2 items</code><br>
+              <code>Recent Events: User sorted by price (low→high) 3m ago</code><br>
+              <code>VISIBLE PRODUCTS (1–5 of 23):</code><br>
+              <code>1. Champion Hoodie — $59.99 — In Stock (ID:45)</code><br>
+              Keep numbered product list clean — one line per product, no JSON.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            static/widget.js <span>move _injectPageContext to mic-press and first-keystroke events; remove DOM-triggered calls</span><br>
+            src/voice_commerce/core/voice/gemini_live_handler.py <span>rewrite inject_live_context format: clean, numbered, minimal</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Timing context injection to "just before user speaks" is a latency trick. The WebSocket message takes a few ms to arrive and Gemini processes it before the first audio chunks arrive. By the time the user's first word is transcribed, Gemini already has the page context. Injecting on every scroll or filter would spam Gemini with repeated context and fill up the session's conversation history with noise (see point 6f in your notes).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0d2616;color:#50fa7b">5C</div>
+    <div class="phase-title">Context Dedup (Both Sides)</div>
+    <div class="phase-goal">No repeated context fills Gemini's history</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5C</div>
+        <div class="part-title">Signature-based dedup on widget.js + backend drop for identical contexts</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-xs">~30 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>widget.js already has signature logic</strong> (<code>_lastContextSignature</code>) — keep it but ensure it's checked before every send.</li>
+            <li><strong>Backend dedup:</strong> In <code>voice_websocket_handler.py</code>, store <code>self._last_context_hash</code>. On receiving a <code>context_update</code>, hash the content. If hash matches the last one, skip the Gemini injection. This prevents double-injection if widget sends context on connect AND on first mic press within 1 second of each other.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/handlers/voice_websocket_handler.py <span>add _last_context_hash, skip injection if unchanged</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1a2340;color:#5b7fff">5D</div>
+    <div class="phase-title">Cart State Injection on Widget Open</div>
+    <div class="phase-goal">Gemini immediately knows what's in the cart when session starts</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5D</div>
+        <div class="part-title">Include cart summary in opening context message</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-xs">~45 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>widget.js already sends <code>cart_count</code> in the <code>context_update</code> page object. But the backend <code>inject_live_context</code> only shows the count. Extend to: also include <code>cart_items</code> (an array of <code>{name, qty, price}</code> sent from the frontend — populated from the real store cart DOM, not just a number). In the context message, include: <code>"Cart: 2 items — Nike Air Max (1x $120), Champion Hoodie (1x $60) — Total: $180"</code>. Gemini can then answer "what's in my cart?" without calling <code>show_cart</code>.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            static/widget.js <span>_injectPageContext: add cart_items array scraped from store cart DOM</span><br>
+            src/voice_commerce/core/voice/gemini_live_handler.py <span>inject_live_context: include cart items in formatted message</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#1e1532;color:#bd93f9">5E</div>
+    <div class="phase-title">Onboarding Suggestion Chips</div>
+    <div class="phase-goal">No more blank-chat cold start</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5E</div>
+        <div class="part-title">3 quick-suggest buttons in empty chat state</div>
+        <div class="part-tags">
+          <span class="tag tag-now">DO NOW</span>
+          <span class="tag tag-s">~1h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>When the chat area is empty (no messages yet), show 3 pill buttons below the chat area. Suggestions are store-aware (set as a <code>data-suggestions</code> attribute in the script tag, or pulled from <code>CONFIG</code>). Examples: "What do you carry?", "Hoodies under $60", "Best sellers". Clicking a chip sends that text as a message — same as typing and pressing send. Chips disappear after first interaction.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            static/widget.js <span>add suggestion chips HTML, show when STATE.messages.length === 0, onclick → _sendText</span><br>
+            static/embed_demo.html <span>add data-suggestions attribute to script tag with 3 store-specific prompts</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>Suggestion chips solve the "blank page problem" in conversational UIs — the same reason Google shows trending searches and ChatGPT shows example prompts. Users often know what they want but don't know how to phrase it for an AI assistant. Chips remove this barrier while also demonstrating the agent's capabilities. For a demo, they also guarantee that a non-technical viewer knows what to click first.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#0a2028;color:#8be9fd">5F</div>
+    <div class="phase-title">Filter / Sort Browser Actions</div>
+    <div class="phase-goal">Agent can visually re-arrange the store grid while talking</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5F</div>
+        <div class="part-title">ApplyFilter + ApplySort action types + widget handlers</div>
+        <div class="part-tags">
+          <span class="tag tag-later">PHASE 5</span>
+          <span class="tag tag-m">~2.5h</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <ul>
+            <li><strong>New browser action <code>ApplyFilter</code>:</strong> fields: <code>filter_type</code> (category/price), <code>value</code> (e.g., "Hoodies" or "50-150"), <code>label</code> (human-readable for toast).</li>
+            <li><strong>New browser action <code>ApplySort</code>:</strong> fields: <code>sort_by</code> (price_asc, price_desc, name, popularity), <code>label</code>.</li>
+            <li><strong>widget.js handlers:</strong> Dispatch these by manipulating the store's native filter/sort controls (click or programmatically set value), OR by filtering the visible product DOM directly (hide products not matching filter). The latter is simpler for the demo — client-side filtering without a page reload.</li>
+            <li><strong>In <code>action_dispatcher.py</code>:</strong> After a <code>search_categories</code> result for a specific category, append an <code>ApplyFilter</code> action so the page visually narrows to that category while Gemini talks about it.</li>
+          </ul>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/core/actions/browser_actions.py <span>add ApplyFilter, ApplySort models</span><br>
+            src/voice_commerce/core/actions/action_dispatcher.py <span>emit ApplyFilter after category search; emit ApplySort when Gemini discusses sorting</span><br>
+            static/widget.js <span>handle apply_filter, apply_sort in _onAction; client-side DOM filter for demo</span>
+          </div>
+        </div>
+        <div class="learn-box">
+          <div class="what-label learn-col">LEARNING NOTE</div>
+          <p>UI actions triggered by AI voice is the core demo-differentiator of this project. Most chatbots respond with text. This agent responds with text AND simultaneously manipulates the visual interface — filters, sorts, highlights. This is the "hands" that most AI assistants don't have. When someone watches the demo and the product grid visually re-filters as the agent speaks, that's the "wow" moment that gets remembered. Engineering-wise, it's just dispatching a DOM event or clicking a button element — deceptively simple code for visually impressive results.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="phase-block">
+  <div class="phase-header">
+    <div class="phase-badge" style="background:#271d0a;color:#ffb86c">5G</div>
+    <div class="phase-title">Context Dedup + History Guard</div>
+    <div class="phase-goal">Gemini's history stays clean even after many context injections</div>
+  </div>
+  <div class="phase-body">
+    <div class="part">
+      <div class="part-head">
+        <div class="part-num">5G</div>
+        <div class="part-title">Keep only last N context injections in Gemini history</div>
+        <div class="part-tags">
+          <span class="tag tag-later">PHASE 5</span>
+          <span class="tag tag-xs">~30 min</span>
+        </div>
+      </div>
+      <div class="part-body">
+        <div class="what">
+          <div class="what-label what-col">WHAT TO CHANGE</div>
+          <p>Context injections are sent as user turns (the <code>send_client_content</code> call). Over a long session, the Gemini context window fills up with old <code>--- CONTEXT UPDATE ---</code> messages that describe pages the user is no longer on. This wastes context tokens and can confuse the model. Track which turns in <code>GLOBAL_SESSIONS</code> are context injections (add a marker). Keep only the last 2 context injections in the session history that's sent to Gemini on reconnect. This has no Gemini API control (they manage the window), but on reconnect we can inject only the most recent context instead of all stored turns.</p>
+        </div>
+        <div class="what">
+          <div class="what-label file-col">FILES TO CHANGE</div>
+          <div class="file-list">
+            src/voice_commerce/handlers/voice_websocket_handler.py <span>mark context_update turns in GLOBAL_SESSIONS; trim on reconnect</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- FINAL ORDER SUMMARY -->
+<h2>Execution Order Summary</h2>
+<table class="summary-table">
+  <thead>
+    <tr><th>Order</th><th>Part</th><th>What</th><th>Effort</th><th>Why First</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>1A + 1B</td><td>System prompt rewrite + store context + category summary at startup</td><td><span class="tag tag-s">~2.5h</span></td><td>First 10 seconds of demo quality</td></tr>
+    <tr><td>2</td><td>2A</td><td>Cart bugs: += fix, empty cart data, tool params</td><td><span class="tag tag-xs">~30 min</span></td><td>Will break on camera otherwise</td></tr>
+    <tr><td>3</td><td>2B</td><td>Audio latency: wire audio_end, remove size filter</td><td><span class="tag tag-xs">~20 min</span></td><td>Removes 1s latency from every reply</td></tr>
+    <tr><td>4</td><td>2C</td><td>Real cart sync: AddToRealCart action + widget AJAX + embed_demo cart</td><td><span class="tag tag-m">~2.5h</span></td><td>Most damaging visible demo bug</td></tr>
+    <tr><td>5</td><td>2D</td><td>Toast polish: tier durations, short copy</td><td><span class="tag tag-xs">~30 min</span></td><td>Quick polish, do while building 2C</td></tr>
+    <tr><td>6</td><td>2E + 2F</td><td>Product modal fixes + animation sequencing</td><td><span class="tag tag-s">~2.5h</span></td><td>Modal is prominent in demo</td></tr>
+    <tr><td>7</td><td>3A</td><td>Full highlight UX: CSS, stagger, dual-state glow, auto-fade</td><td><span class="tag tag-m">~2.5h</span></td><td>The visual "wow" — builds on 2F timing work</td></tr>
+    <tr><td>8</td><td>4A</td><td>Unify embedding + entities + threshold</td><td><span class="tag tag-s">~1.5h</span></td><td>Makes every search result sharper</td></tr>
+    <tr><td>9</td><td>4B</td><td>search_categories tool</td><td><span class="tag tag-s">~1.5h</span></td><td>Answers "what do you have?" cleanly</td></tr>
+    <tr><td>10</td><td>4C</td><td>Fix category filter (Option A: remove the lie)</td><td><span class="tag tag-xs">~30 min</span></td><td>Stops silent search quality degradation</td></tr>
+    <tr><td>11</td><td>4D</td><td>Pagination / "show me more"</td><td><span class="tag tag-s">~1.5h</span></td><td>Enables multi-turn search demo</td></tr>
+    <tr><td>12</td><td>4E</td><td>Tool registry descriptions</td><td><span class="tag tag-xs">~45 min</span></td><td>Reduces tool-call errors</td></tr>
+    <tr><td>13</td><td>5E</td><td>Onboarding suggestion chips</td><td><span class="tag tag-s">~1h</span></td><td>Removes blank-chat cold start</td></tr>
+    <tr><td>14</td><td>5A</td><td>Passive event tracking when agent is closed</td><td><span class="tag tag-s">~2h</span></td><td>Agent knows user journey before opening</td></tr>
+    <tr><td>15</td><td>5B + 5C</td><td>Smart context injection timing + dedup</td><td><span class="tag tag-s">~2h</span></td><td>Fixes context spam in Gemini history</td></tr>
+    <tr><td>16</td><td>5D</td><td>Cart state in opening context</td><td><span class="tag tag-xs">~45 min</span></td><td>Agent knows cart without tool call</td></tr>
+    <tr><td>17</td><td>5F</td><td>Filter / sort browser actions</td><td><span class="tag tag-m">~2.5h</span></td><td>The visual "hands" differentiator</td></tr>
+    <tr><td>18</td><td>5G</td><td>Context history guard</td><td><span class="tag tag-xs">~30 min</span></td><td>Clean Gemini history on long sessions</td></tr>
+    <tr><td>19</td><td>3B</td><td>Transcript soft highlight (optional)</td><td><span class="tag tag-m">~2h</span></td><td>Do only if time allows after 1–18</td></tr>
+  </tbody>
+</table>
+
+<div class="callout green">
+  <strong>Checkpoint:</strong> After parts 1–7 (Phases 1–2 + highlight), the demo is already very strong — good enough to record and upload to GitHub. Parts 8–19 make it excellent.
+</div>
+
+<div class="callout info">
+  <strong>When ready to start:</strong> Say "let's do Part 1A" and the implementation begins step by step — plan, files, code, why, how to test quickly.
+</div>
+
+</div>
+</body>
+</html>
