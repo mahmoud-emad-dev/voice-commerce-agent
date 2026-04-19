@@ -35,7 +35,7 @@ MSG_STATUS      = "status"
 MSG_ERROR       = "error"
 MSG_AUDIO_CFG   = "audio_config"
 MSG_MIC_CONFIG  = "mic_config"   #  Tells browser what sample rate to capture mic at
-# MSG_AUDIO_END   = "audio_end"
+MSG_AUDIO_END   = "audio_end"
 
 STATUS_THINKING   = "thinking"
 STATUS_RESPONDING = "responding"
@@ -73,6 +73,7 @@ class VoiceWebSocketHandler:
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
+        self._gemini_session_open: bool = False
         self.action_dispatcher = ActionDispatcher()
         log.info("voice_handler_created", session_id=self.session_id)
 
@@ -102,6 +103,7 @@ class VoiceWebSocketHandler:
             # 2 ====== Open the Gemini Live session ======
             async with GeminiLiveHandler(transcript=self._transcript , resumption_handle=self._resumption_handle) as gemini:
                 self._gemini = gemini
+                self._gemini_session_open = True
                 await self._send_status(STATUS_READY, "Ready — speak or type")
 
                 # ── 2.1 Proactive Greeting (Only on first connection) ──────────
@@ -145,6 +147,7 @@ class VoiceWebSocketHandler:
 
         finally:
             self._gemini = None
+            self._gemini_session_open = False
             log.info("ws_handler_finished", session_id=self.session_id,total_turns=len(self._transcript))
 
 
@@ -184,28 +187,41 @@ class VoiceWebSocketHandler:
                 
                 log.debug("mic_chunk_received",bytes=len(raw_bytes),session_id=self.session_id) # for test as temp
                 # Stream the raw binary straight into Google's ears
-                await gemini.send_audio_chunk(raw_bytes)
+                if not self._gemini_session_open:
+                    log.info("mic_chunk_ignored_after_session_closed", session_id=self.session_id)
+                    continue
+                try:
+                    await gemini.send_audio_chunk(raw_bytes)
+                except Exception as exc:
+                    log.warning("send_audio_chunk_failed", session_id=self.session_id, error=str(exc))
+                    raise WebSocketDisconnect(code=1011)
 
 
             # ── 2. HANDLE TEXT (Chat Box) TEXT FRAME = typed message or control JSON ─────────────
             elif raw_text is not None:
                 # ── TEXT FRAME = typed message or control JSON ─────────────
-                # try:
-                #     parsed = json.loads(raw_text)
-                # except json.JSONDecodeError:
-                #     parsed = None
+                try:
+                    parsed = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    parsed = None
 
-                # # control message from browser: user stopped speaking
-                # if isinstance(parsed, dict) and parsed.get("type") == MSG_AUDIO_END:
-                #     log.info("audio_end_received_from_browser", session_id=self.session_id)
-                #     await gemini.send_audio_stream_end()
-                #     await self._send_status(STATUS_THINKING, "Processing speech...")
-                #     continue
+                # control message from browser: user stopped speaking
+                if isinstance(parsed, dict) and parsed.get("type") == MSG_AUDIO_END:
+                    log.info("audio_end_received_from_browser", session_id=self.session_id)
+                    if self._gemini_session_open:
+                        try:
+                            await gemini.send_audio_stream_end()
+                        except Exception as exc:
+                            log.warning("send_audio_stream_end_failed", session_id=self.session_id, error=str(exc))
+                            raise WebSocketDisconnect(code=1011)
+                    await self._send_status(STATUS_THINKING, "Processing speech...")
+                    continue
                 
                 # ── 2.1 HANDLE CONTEXT UPDATES (Hidden from Chat) ─────────────
                 try:
-                    parsed = json.loads(raw_text)
                     if isinstance(parsed, dict) and parsed.get("type") == "context_update":
+                        # TEMP DEBUG: Disable backend context injection to isolate
+                        # Gemini Live behavior without extra hidden prompt traffic.
                         log.info("context_update_received", session_id=self.session_id , filters=parsed.get("page", {}).get("active_filters", []) , items=len(parsed.get("products", [])))
                         log.info("context_update_received", parsed=parsed)
                         log.info("context_update_received", page=parsed.get("page", {}), products=parsed.get("products", []))
@@ -213,6 +229,7 @@ class VoiceWebSocketHandler:
                             page=parsed.get("page", {}),
                             products=parsed.get("products", [])
                         )
+                        log.info("context_update_ignored_for_debug", session_id=self.session_id)
                         continue  # Skip the rest of the loop so it doesn't show in chat!
                 except json.JSONDecodeError:
                     pass
@@ -326,13 +343,12 @@ class VoiceWebSocketHandler:
 
                 # 3. TRAFFIC TO GEMINI AI
                 # Send the result back to Gemini, referencing the call_id so Gemini knows which call this result belongs to
-                # # We format the payload as a dictionary for Gemini
-                # if tool_response.status == "error":
-                #     gemini_payload = {"error": tool_response.ai_text}
-                # else:
-                #     gemini_payload = {"result": tool_response.ai_text}
-                #  temporary we will just send str not dict to gemini as im buildig the send_tool_result to take str nad send str not dict 
-                await gemini.send_tool_result(call_id, tool_name, tool_response.ai_text)
+                gemini_payload = {
+                    "status": tool_response.status,
+                    "ai_text": tool_response.ai_text,
+                    "data": tool_response.data,
+                }
+                await gemini.send_tool_result(call_id, tool_name, gemini_payload)
 
 
 
@@ -374,6 +390,7 @@ class VoiceWebSocketHandler:
             # ── 9. SESSION MANAGEMENT & ERRORS ─────────────────────────────────────────────────
             # --- NEW: Catch Google's warning that the session is about to die! ---
             elif event_type == "go_away":
+                self._gemini_session_open = False
                 log.info("triggering_graceful_reconnect_due_to_goaway", session=self.session_id)
                 # Close the browser websocket with Code 1000 so the frontend instantly reconnects!
                 await websocket.close(code=1000, reason="Gemini session refresh")
@@ -382,10 +399,14 @@ class VoiceWebSocketHandler:
             # ── SESSION CLOSED (Gemini ended connection gracefully) ─────────
             elif event_type == "session_closed":
                 reason = event.get("reason", "unknown")
+                self._gemini_session_open = False
                 log.info("gemini_session_closed_gracefully", reason=reason, session=self.session_id)
+
+                if reason == "resumption_conflict":
+                    GLOBAL_HANDLES.pop(self.session_id, None)
                 
                 # If it was a timeout, a 1008 bug, or a 1001 drop, instantly reconnect!
-                if reason in ["gemini_timeout", "gemini_live_1008", "normal_closure"] or event.get("retryable"):
+                if reason in ["gemini_timeout", "gemini_live_1008", "normal_closure", "resumption_conflict"] or event.get("retryable"):
                     await websocket.close(code=1000, reason="Gemini session refresh")
                 else:
                     await websocket.close(code=1000, reason="Session closed")

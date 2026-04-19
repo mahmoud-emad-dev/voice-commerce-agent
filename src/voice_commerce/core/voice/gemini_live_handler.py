@@ -13,6 +13,7 @@ from datetime import datetime
 import structlog
 from google import genai
 from google.genai import types
+from websockets.exceptions import ConnectionClosed
 
 from voice_commerce.core.tools import tool_registry   
 from voice_commerce.core.voice import audio_processor  
@@ -46,8 +47,7 @@ class GeminiLiveHandler:
 
     def _build_session_config(self) -> types.LiveConnectConfig:
         """Builds the configuration for the Gemini speech session."""
-        
-        return types.LiveConnectConfig(
+        config_kwargs: dict[str, Any] = dict(
 
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
@@ -70,12 +70,12 @@ class GeminiLiveHandler:
             input_audio_transcription=types.AudioTranscriptionConfig(),   
             output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=tool_registry.get_all_tools(),  
-            session_resumption = types.SessionResumptionConfig(
+            session_resumption=types.SessionResumptionConfig(
                 handle=self._resumption_handle
-                ),
+            ),
             context_window_compression=types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow(),
-                ),
+            ),
             # thinking_config=types.ThinkingConfig(thinking_budget=0),
             # realtime_input_config=types.RealtimeInputConfig(
             #         automatic_activity_detection=types.AutomaticActivityDetection(
@@ -87,7 +87,9 @@ class GeminiLiveHandler:
             #         )
                 # ),
 
-            )
+        )
+
+        return types.LiveConnectConfig(**config_kwargs)
             
     def _build_system_prompt(self) -> str:
         """The 'Rules' the AI must follow, plus previous chat history."""
@@ -224,7 +226,12 @@ class GeminiLiveHandler:
         )
 
 
-    async def send_tool_result(self, call_id:   str | None, tool_name: str,result:    str) -> None:
+    async def send_tool_result(
+        self,
+        call_id: str | None,
+        tool_name: str,
+        result: dict[str, Any],
+    ) -> None:
         """
         Send a python function's return value back to Gemini after executing it.
  
@@ -235,21 +242,22 @@ class GeminiLiveHandler:
         4. Handler calls this method → result delivered to Gemini
         5. Gemini reads result → speaks it naturally to the user
  
-        WHY result is a string (not JSON or a dict):
-        Gemini reads the result as text context, then paraphrases it into
-        natural speech. A structured readable string is ideal.
+        WHY result is structured:
+        Gemini tool responses are easiest for the model to reason over when we
+        return both the human-readable message and the machine-usable data
+        payload. This also keeps our transport aligned with ToolResponse.
         """
 
         if self._session is None:
             raise RuntimeError("Cannot send tool result: not connected.")
-        log.debug("gemini_sending_tool_result",tool=tool_name, preview=result[:80])
+        log.debug("gemini_sending_tool_result", tool=tool_name, preview=str(result)[:160])
 
         await self._session.send_tool_response(
             function_responses=[
                 types.FunctionResponse(
                     id=call_id,  # correlate with the tool call
                     name=tool_name,
-                    response={"result": result},
+                    response=result,
                 )
             ],
         )
@@ -302,15 +310,15 @@ class GeminiLiveHandler:
             ),
             turn_complete=True,
         )
-    # async def send_audio_stream_end(self) -> None:
-    #     """
-    #     Tell Gemini that the current user audio stream has ended.
-    #     This helps Gemini flush buffered speech and respond sooner.
-    #     """
-    #     if self._session is None:
-    #         raise RuntimeError("Cannot end audio stream: session not connected.")
+    async def send_audio_stream_end(self) -> None:
+        """
+        Tell Gemini the current microphone stream ended explicitly.
+        This prevents relying only on server-side VAD for turn boundaries.
+        """
+        if self._session is None:
+            raise RuntimeError("Cannot end audio stream: session not connected.")
 
-    #     await self._session.send_realtime_input(audio_stream_end=True)
+        await self._session.send_realtime_input(audio_stream_end=True)
 
     # =========================================================================
     # RECEIVING Events METHOD (Gemini -> App)
@@ -409,6 +417,18 @@ class GeminiLiveHandler:
 
         except Exception as exc:
             error_msg = str(exc)
+            if isinstance(exc, ConnectionClosed):
+                log.info("gemini_session_closed_by_transport", reason=error_msg)
+                yield {"type": "session_closed", "reason": "transport_closed"}
+                return
+            if "409" in error_msg and "conflict" in error_msg.lower():
+                log.warning("gemini_resumption_conflict", reason=error_msg)
+                yield {
+                    "type": "session_closed",
+                    "reason": "resumption_conflict",
+                    "retryable": True,
+                }
+                return
             # 1. Catch known Gemini Live API bugs (e.g., fast barge-in panic)
             if "1008" in error_msg and  "Operation is not implemented" in error_msg:
                 log.error("gemini_1008_live_api_bug", error=error_msg)
@@ -443,13 +463,30 @@ class GeminiLiveHandler:
         """Opens the WebSocket to Gemini's servers."""
         log.info("gemini_session_connecting", model=settings.gemini_model )
 
-        self._session_ctx = self._client.aio.live.connect(
-            model=settings.gemini_model,
-            config=self._config,    
-        )
+        try:
+            self._session_ctx = self._client.aio.live.connect(
+                model=settings.gemini_model,
+                config=self._config,
+            )
+            # Enter the context manager → opens the WebSocket to Gemini's servers
+            self._session = await self._session_ctx.__aenter__()
+        except Exception as exc:
+            error_msg = str(exc)
+            if self._resumption_handle and "409" in error_msg and "conflict" in error_msg.lower():
+                log.warning(
+                    "gemini_connect_resumption_conflict_retrying_fresh",
+                    error=error_msg,
+                )
+                self._resumption_handle = None
+                self._config = self._build_session_config()
+                self._session_ctx = self._client.aio.live.connect(
+                    model=settings.gemini_model,
+                    config=self._config,
+                )
+                self._session = await self._session_ctx.__aenter__()
+            else:
+                raise
 
-        # Enter the context manager → opens the WebSocket to Gemini's servers
-        self._session = await self._session_ctx.__aenter__()
         log.info("gemini_session_connected")
         return self
     
