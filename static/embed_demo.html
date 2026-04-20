@@ -2209,6 +2209,8 @@
 
       el.innerHTML = cats.map(c => `
     <button class="cat-pill ${STATE.activeCategory === c ? 'active' : ''}"
+            data-filter="${c === 'all' ? 'all' : c}"
+            data-filter-type="category"
             onclick="filterCategory('${c}')">
       ${c === 'all' ? 'All Products' : c}
       <span style="font-size:11px;opacity:0.6">${counts[c] || ''}</span>
@@ -2224,11 +2226,22 @@
       PRODUCTS.forEach(p => { counts[p.category] = (counts[p.category] || 0) + 1; });
       el.innerHTML = cats.map(c => `
     <label class="filter-option">
-      <input type="checkbox" class="f-cat" value="${c}" onchange="applyFilters()">
+      <input type="checkbox" class="f-cat" value="${c}" onchange="applyFilters()" ${STATE.activeCategory === c ? 'checked' : ''}>
       ${c}
       <span class="filter-count">${counts[c]}</span>
     </label>
   `).join('');
+    }
+
+    function syncFilterUi() {
+      document.querySelectorAll('.f-cat').forEach(el => {
+        el.checked = (STATE.activeCategory !== 'all' && el.value === STATE.activeCategory);
+      });
+
+      const sortSelect = document.getElementById('sort-select');
+      if (sortSelect && sortSelect.value !== STATE.sortBy) {
+        sortSelect.value = STATE.sortBy;
+      }
     }
 
     function renderGenderCounts() {
@@ -2271,7 +2284,12 @@
         ).join('');
 
         return `
-    <li class="product woocommerce-loop-product" data-product_id="${p.id}" data-product-id="${p.id}">
+    <li class="product woocommerce-loop-product"
+        data-product_id="${p.id}"
+        data-product-id="${p.id}"
+        data-category="${esc(p.category)}"
+        data-price="${dispPrice}"
+        data-name="${esc(p.name)}">
       <div class="product-img-wrap">
         <img class="primary" src="${p.img}" alt="${esc(p.name)}" loading="lazy"
              onerror="this.src='https://via.placeholder.com/300x375/f2efe9/888?text=${encodeURIComponent(p.name.split(' ')[0])}'">
@@ -2340,29 +2358,21 @@
       const minP = parseFloat(document.getElementById('f-min')?.value) || 0;
       const maxP = parseFloat(document.getElementById('f-max')?.value) || Infinity;
 
-      /* Selected sidebar categories */
       const selCats = [...document.querySelectorAll('.f-cat:checked')].map(el => el.value);
 
       STATE.filtered = PRODUCTS.filter(p => {
-        /* Gender filter */
         if (menCk || womenCk || unisexCk) {
           if (menCk && p.gender === 'men') { }
           else if (womenCk && p.gender === 'women') { }
           else if (unisexCk && p.gender === 'unisex') { }
           else return false;
         }
-        /* Nav-level gender filter */
         if (STATE.activeGender !== 'all' && p.gender !== STATE.activeGender) return false;
-        /* Category filter (cat pill) */
         if (STATE.activeCategory !== 'all' && p.category !== STATE.activeCategory) return false;
-        /* Sidebar category checkboxes */
         if (selCats.length && !selCats.includes(p.category)) return false;
-        /* Price */
         const price = p.sale > 0 ? p.sale : p.price;
         if (price < minP || price > maxP) return false;
-        /* Stock */
         if (instockCk && p.stock <= 0) return false;
-        /* Search */
         if (STATE.searchQuery) {
           const q = STATE.searchQuery.toLowerCase();
           const haystack = (p.name + ' ' + p.category + ' ' + p.short + ' ' + p.colors.join(' ')).toLowerCase();
@@ -2375,12 +2385,15 @@
       STATE.page = 1;
       renderProducts();
       renderCatPills();
+      renderSidebarCats();
+      syncFilterUi();
     }
 
     function sortProducts() {
       STATE.sortBy = document.getElementById('sort-select').value;
       sortProductsInState();
       renderProducts();
+      syncFilterUi();
     }
 
     function sortProductsInState() {
@@ -2399,6 +2412,9 @@
     function filterCategory(cat) {
       STATE.activeCategory = cat;
       STATE.activeGender = 'all';
+      document.querySelectorAll('.f-cat').forEach(el => {
+        el.checked = (cat !== 'all' && el.value === cat);
+      });
       updateNavHighlight('');
       applyFilters();
       scrollToShop();
@@ -2443,6 +2459,75 @@
       STATE.sortBy = 'default';
       updateNavHighlight('all');
       applyFilters();
+    }
+
+    function applyAssistantCategoryFilter(cat) {
+      try {
+        const normalized = String(cat || 'all').trim() || 'all';
+        STATE.activeCategory = normalized;
+        STATE.activeGender = 'all';
+        STATE.searchQuery = '';
+        STATE.page = 1;
+        STATE.sortBy = 'default';
+
+        const searchInput = document.querySelector('input[name="s"]');
+        if (searchInput) searchInput.value = '';
+
+        document.querySelectorAll('.f-cat').forEach(el => {
+          el.checked = (normalized !== 'all' && el.value === normalized);
+        });
+        // Safely handle missing filter elements
+        const genderIds = ['f-men', 'f-women', 'f-unisex', 'f-instock'];
+        genderIds.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.checked = false;
+        });
+        const minEl = document.getElementById('f-min');
+        const maxEl = document.getElementById('f-max');
+        const sortEl = document.getElementById('sort-select');
+        if (minEl) minEl.value = '';
+        if (maxEl) maxEl.value = '';
+        if (sortEl) sortEl.value = 'default';
+
+        updateNavHighlight('');
+        applyFilters();
+        scrollToShop();
+      } catch (e) {
+        console.error('applyAssistantCategoryFilter error:', e);
+      }
+      return true;
+    }
+
+    function applyAssistantPriceFilter(rangeText) {
+      const range = String(rangeText || '').split('-');
+      const minInput = document.getElementById('f-min');
+      const maxInput = document.getElementById('f-max');
+      if (!minInput && !maxInput) return false;
+      if (minInput) minInput.value = range[0] || '';
+      if (maxInput) maxInput.value = range[1] || '';
+      applyFilters();
+      scrollToShop();
+      return true;
+    }
+
+    function applyAssistantSort(sortValue) {
+      const sortMap = {
+        price_asc: 'price-asc',
+        price_desc: 'price-desc',
+        name: 'name-asc',
+        popularity: 'default',
+        newest: 'default'
+      };
+      const normalized = sortMap[String(sortValue || '').trim()] || String(sortValue || '').trim();
+      const select = document.getElementById('sort-select');
+      if (!select) return false;
+      if ([...select.options].some(opt => opt.value === normalized)) {
+        select.value = normalized;
+      }
+      STATE.sortBy = select.value || 'default';
+      sortProducts();
+      scrollToShop();
+      return true;
     }
 
     function scrollToShop() {
@@ -2842,6 +2927,9 @@
     (function init() {
       window.__VC_EMBED_DEMO__ = true;
       window.vcAddToCart = handleVoiceAddToCart;
+      window.vcApplyCategoryFilter = applyAssistantCategoryFilter;
+      window.vcApplyPriceFilter = applyAssistantPriceFilter;
+      window.vcApplySort = applyAssistantSort;
       window.vcRevealProduct = function (productId) {
         var pid = Number(productId);
         if (!pid) return false;
@@ -2851,6 +2939,14 @@
 
         var currentMatch = document.querySelector('[data-product_id="' + pid + '"], [data-product-id="' + pid + '"]');
         if (currentMatch) return true;
+
+        var filteredIndex = STATE.filtered.findIndex(function (p) { return p.id === pid; });
+        if (filteredIndex !== -1) {
+          var filteredTargetPage = Math.floor(filteredIndex / STATE.perPage) + 1;
+          goPage(filteredTargetPage);
+          scrollToShop();
+          return true;
+        }
 
         STATE.searchQuery = '';
         STATE.activeCategory = 'all';

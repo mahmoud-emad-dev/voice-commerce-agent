@@ -1,16 +1,17 @@
 from __future__ import annotations
-from typing import Literal , Union , Annotated
+from typing import Literal, Union, Annotated
 
-from pydantic import BaseModel , Field
+from pydantic import BaseModel, Field
 
 type NotificationLevel = Literal["success", "error", "info", "warning"]
 
 # ── Base ─────────────────────────────────────────────────────────────────────
 
-class  _ActionBase(BaseModel):
+
+class _ActionBase(BaseModel):
     """Common envelope all actions share."""
 
-    type : Literal["action"] = "action"
+    type: Literal["action"] = "action"
 
     def to_ws_json(self) -> str:
         """Serialize for sending over WebSocket."""
@@ -18,6 +19,7 @@ class  _ActionBase(BaseModel):
 
 
 # ── Individual action models ──────────────────────────────────────────────────
+
 
 ## Product actions
 class HighlightProduct(_ActionBase):
@@ -29,6 +31,7 @@ class HighlightProduct(_ActionBase):
     auto_fade_ms: total ms before highlight fully fades away
     show_badge: whether the browser should render the numeric search-order badge
     """
+
     action: Literal["highlight_product"] = "highlight_product"
     product_id: int
     scroll_to: bool = True
@@ -36,14 +39,17 @@ class HighlightProduct(_ActionBase):
     intensity: Literal["primary", "secondary"] = "primary"
     auto_fade_ms: int = 8000
     show_badge: bool = False
-    
+
+
 class ScrollToProduct(_ActionBase):
     """
     Smooth-scroll the store page to a product without highlighting it.
     Useful for 'let me show you the running shoes' without drawing attention.
     """
+
     action: Literal["scroll_to_product"] = "scroll_to_product"
     product_id: int
+
 
 ## Cart actions
 class UpdateCartBadge(_ActionBase):
@@ -52,8 +58,10 @@ class UpdateCartBadge(_ActionBase):
     Call this immediately after add_to_cart succeeds so the badge
     reflects the new total without a full page reload.
     """
+
     action: Literal["update_cart_badge"] = "update_cart_badge"
-    count: int         # total items in cart
+    count: int  # total items in cart
+
 
 class AddToRealCart(_ActionBase):
     """
@@ -62,23 +70,29 @@ class AddToRealCart(_ActionBase):
     For embed_demo.html: dispatches window event 'vc:addToCart'.
     This is separate from UpdateCartBadge (cosmetic badge count only).
     """
+
     action: Literal["add_to_real_cart"] = "add_to_real_cart"
     product_id: int
     quantity: int = 1
+
 
 class OpenCart(_ActionBase):
     """
     Slide open the WooCommerce cart side-panel (or drawer).
     Triggered after the assistant adds something so the user can review.
     """
+
     action: Literal["open_cart"] = "open_cart"
+
 
 class CloseCart(_ActionBase):
     """
     Close the WooCommerce cart side-panel (or drawer).
     Triggered after the assistant adds something so the user can review.
     """
+
     action: Literal["close_cart"] = "close_cart"
+
 
 ## Other Actions
 class ShowProductModal(_ActionBase):
@@ -87,6 +101,7 @@ class ShowProductModal(_ActionBase):
     product_data carries display fields so the modal never scrapes the DOM.
     All display data travels with the action — DOM may not have this product visible.
     """
+
     action: Literal["show_product_modal"] = "show_product_modal"
     product_id: int
     product_name: str
@@ -100,27 +115,55 @@ class ShowNotification(_ActionBase):
     type controls colour: 'success' → green, 'error' → red,
                           'info' → blue, 'warning' → amber.
     """
+
     action: Literal["show_notification"] = "show_notification"
     message: str
     level: NotificationLevel = "info"
-    duration_ms: int = 3000      # how long before it fades
+    duration_ms: int = 3000  # how long before it fades
+
 
 class SetSearchQuery(_ActionBase):
     """
     Pre-fill the store's search input and optionally submit it.
     Useful when the assistant says 'let me search for leather belts for you'.
     """
+
     action: Literal["set_search_query"] = "set_search_query"
     query: str
-    submit: bool = False         # True = also submit the form
+    submit: bool = False  # True = also submit the form
+
+
+class ApplyFilter(_ActionBase):
+    """
+    Apply a visual store filter such as category or price.
+    value is the raw filter value; label is human-readable UI copy.
+    """
+
+    action: Literal["apply_filter"] = "apply_filter"
+    filter_type: Literal["category", "price", "brand", "tag"] = "category"
+    value: str
+    label: str
+
+
+class ApplySort(_ActionBase):
+    """
+    Apply a visual store sort mode such as price ascending or popularity.
+    """
+
+    action: Literal["apply_sort"] = "apply_sort"
+    sort_by: Literal["price_asc", "price_desc", "name", "popularity", "newest"] = "price_asc"
+    label: str
+
 
 class ClearHighlights(_ActionBase):
     """Remove all active highlights from the page (housekeeping)."""
+
     action: Literal["clear_highlights"] = "clear_highlights"
- 
+
+
 # ── Discriminated union ───────────────────────────────────────────────────────
 
- 
+
 BrowserAction = Annotated[
     Union[
         HighlightProduct,
@@ -132,6 +175,8 @@ BrowserAction = Annotated[
         CloseCart,
         ShowProductModal,
         SetSearchQuery,
+        ApplyFilter,
+        ApplySort,
         ClearHighlights,
     ],
     Field(discriminator="action"),
@@ -148,6 +193,7 @@ Example:
 
 
 # Convenience helpers used by action_dispatcher --------------------------------
+
 
 def highlight(
     product_id: int,
@@ -166,18 +212,40 @@ def highlight(
         auto_fade_ms=auto_fade_ms,
         show_badge=show_badge,
     )
- 
-def notify(message: str, level: NotificationLevel = "info", duration_ms: int = 3000) -> ShowNotification:
-    return ShowNotification(message=message, level=level, duration_ms=duration_ms)  
- 
+
+
+def notify(
+    message: str, level: NotificationLevel = "info", duration_ms: int = 3000
+) -> ShowNotification:
+    return ShowNotification(message=message, level=level, duration_ms=duration_ms)
+
+
 def update_badge(count: int) -> UpdateCartBadge:
     return UpdateCartBadge(count=count)
 
+
 def add_to_real_cart(product_id: int, quantity: int = 1) -> AddToRealCart:
     return AddToRealCart(product_id=product_id, quantity=quantity)
- 
+
+
 def open_cart() -> OpenCart:
     return OpenCart()
+
+
+def apply_filter(
+    filter_type: Literal["category", "price", "brand", "tag"],
+    value: str,
+    label: str,
+) -> ApplyFilter:
+    return ApplyFilter(filter_type=filter_type, value=value, label=label)
+
+
+def apply_sort(
+    sort_by: Literal["price_asc", "price_desc", "name", "popularity", "newest"],
+    label: str,
+) -> ApplySort:
+    return ApplySort(sort_by=sort_by, label=label)
+
 
 # def close_cart() -> CloseCart:
 #     return CloseCart()
