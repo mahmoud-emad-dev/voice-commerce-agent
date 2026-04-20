@@ -19,10 +19,9 @@ SINGLETON PATTERN:
     creates one RagService per tenant by collection_name.
 """
 
-
 from __future__ import annotations
 from typing import Any, TypedDict, TypeAlias
-import time 
+import time
 from collections import Counter
 
 import structlog
@@ -32,6 +31,7 @@ from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.core.rag.retriever import Retriever
 from voice_commerce.models.product import Product
+
 # from voice_commerce.services.woocommerce_client import get_client
 from voice_commerce.services.csv_client import get_client
 
@@ -72,6 +72,7 @@ CategoryLookup: TypeAlias = dict[str, str]
 # ── Module-level singleton ────────────────────────────────────────────────────
 _service_instance: "RagService | None" = None
 
+
 def get_rag_service() -> "RagService":
     """
     Return the global RagService singleton, creating it if needed.
@@ -80,6 +81,7 @@ def get_rag_service() -> "RagService":
     if _service_instance is None:
         _service_instance = RagService()
     return _service_instance
+
 
 # ── Service class ─────────────────────────────────────────────────────────────
 class RagService:
@@ -131,7 +133,9 @@ class RagService:
         }
 
     @classmethod
-    def _build_product_snapshot(cls, product: Product, parsed_path: CategoryPathParts) -> CategoryProductSnapshot:
+    def _build_product_snapshot(
+        cls, product: Product, parsed_path: CategoryPathParts
+    ) -> CategoryProductSnapshot:
         """Build the slim deterministic snapshot used for grouped category retrieval."""
         return {
             "id": product.id,
@@ -170,7 +174,9 @@ class RagService:
             "parent_groups": list(data["parent_groups"]),
         }
 
-    def _build_category_indexes(self, products: list[Product]) -> tuple[CategorySummary, ProductsByCategory, CategoryLookup]:
+    def _build_category_indexes(
+        self, products: list[Product]
+    ) -> tuple[CategorySummary, ProductsByCategory, CategoryLookup]:
         """
         Build category summary and grouped product snapshots from loaded products.
         Grouping key is the leaf category because UX/tooling uses product-type filters
@@ -189,7 +195,9 @@ class RagService:
             for raw_path in set(raw_paths):
                 parsed = self._parse_category_path(raw_path)
                 leaf_category = parsed["leaf_category"]
-                grouped.setdefault(leaf_category, []).append(self._build_product_snapshot(product, parsed))
+                grouped.setdefault(leaf_category, []).append(
+                    self._build_product_snapshot(product, parsed)
+                )
 
         summary: CategorySummary = {}
         for category, items in grouped.items():
@@ -202,8 +210,12 @@ class RagService:
                     item["id"],
                 ),
             )
-            subcategory_counts = Counter(item["sub_category"] for item in items_sorted if item["sub_category"])
-            parent_groups = Counter(item["main_category"] for item in items_sorted if item["main_category"])
+            subcategory_counts = Counter(
+                item["sub_category"] for item in items_sorted if item["sub_category"]
+            )
+            parent_groups = Counter(
+                item["main_category"] for item in items_sorted if item["main_category"]
+            )
             summary[category] = {
                 "count": len(items_sorted),
                 "example_names": [item["name"] for item in items_sorted[:2]],
@@ -221,8 +233,7 @@ class RagService:
             # top_categories=sorted(summary.keys())[:] if summary else [],
         )
         category_lookup: CategoryLookup = {
-            self._normalize_category_key(category_name): category_name
-            for category_name in summary
+            self._normalize_category_key(category_name): category_name for category_name in summary
         }
         return summary, grouped, category_lookup
 
@@ -294,10 +305,14 @@ class RagService:
         direct_category_rules = {
             "short": "Shorts",
             "shorts": "Shorts",
+            "t-shirt": "Tees",
+            "t-shirts": "Tees",
+            "t shirts": "Tees",
+            "t shirt": "Tees",
+            "tshirt": "Tees",
+            "tshirts": "Tees",
             "tee": "Tees",
             "tees": "Tees",
-            "t-shirt": "Tees",
-            "t shirts": "Tees",
             "shirt": "Tees",
             "shirts": "Tees",
             "tank": "Tanks",
@@ -321,7 +336,16 @@ class RagService:
             if token in normalized_query:
                 preferred.add(category_name)
 
-        summer_cues = {"summer", "light", "lighter", "lightweight", "cool", "breathable", "hot weather", "warm weather"}
+        summer_cues = {
+            "summer",
+            "light",
+            "lighter",
+            "lightweight",
+            "cool",
+            "breathable",
+            "hot weather",
+            "warm weather",
+        }
         if any(cue in normalized_query for cue in summer_cues):
             preferred.update({"Shorts", "Tees", "Tanks", "Bras & Tanks", "Performance Fabrics"})
             discouraged.update({"Hoodies & Sweatshirts", "Jackets", "Pants"})
@@ -339,10 +363,16 @@ class RagService:
         strict_rules = {
             "short": "Shorts",
             "shorts": "Shorts",
+            "t-shirt": "Tees",
+            "t-shirts": "Tees",
+            "t shirts": "Tees",
+            "t shirt": "Tees",
+            "tshirt": "Tees",
+            "tshirts": "Tees",
             "tee": "Tees",
             "tees": "Tees",
-            "t shirt": "Tees",
-            "t shirts": "Tees",
+            "shirt": "Tees",
+            "shirts": "Tees",
             "tank": "Tanks",
             "tanks": "Tanks",
             "bra": "Bras & Tanks",
@@ -375,7 +405,9 @@ class RagService:
         Apply a light heuristic rerank over vector results to reduce obvious bad fits.
         """
         normalized_query = self._normalize_query_text(query)
-        preferred_categories, discouraged_categories = self._preferred_categories_for_query(normalized_query)
+        preferred_categories, discouraged_categories = self._preferred_categories_for_query(
+            normalized_query
+        )
         query_terms = set(normalized_query.replace("-", " ").split())
 
         if not products:
@@ -412,7 +444,9 @@ class RagService:
         scored.sort(key=lambda item: (-item[0], item[1].price, item[1].name.lower(), item[1].id))
         return [product for _, product in scored]
 
-    def search_category_summaries(self, keyword: str | None = None) -> list[tuple[str, CategorySummaryEntry]]:
+    def search_category_summaries(
+        self, keyword: str | None = None
+    ) -> list[tuple[str, CategorySummaryEntry]]:
         """Return category summaries sorted by descending count, optionally filtered by keyword."""
         normalized_keyword = self._normalize_category_key(keyword or "")
         matches: list[tuple[str, CategorySummaryEntry]] = []
@@ -445,7 +479,10 @@ class RagService:
         if not resolved_category:
             return []
 
-        items = [self._copy_product_snapshot(item) for item in self._products_by_category.get(resolved_category, [])]
+        items = [
+            self._copy_product_snapshot(item)
+            for item in self._products_by_category.get(resolved_category, [])
+        ]
         if max_price is not None:
             items = [item for item in items if item["price"] <= max_price]
         if in_stock_only:
@@ -456,7 +493,6 @@ class RagService:
         if limit is not None:
             items = items[: max(1, int(limit))]
         return items
-
 
     # ── Catalog sync ──────────────────────────────────────────────────────────
     async def sync_catalog(self) -> int:
@@ -481,7 +517,9 @@ class RagService:
             return 0
 
         # 1.5 Build category intelligence caches for prompt/context and deterministic retrieval.
-        self._category_summary, self._products_by_category, self._category_lookup = self._build_category_indexes(all_products)
+        self._category_summary, self._products_by_category, self._category_lookup = (
+            self._build_category_indexes(all_products)
+        )
         log.info(
             "rag_category_caches_ready",
             category_count=len(self._category_summary),
@@ -491,17 +529,13 @@ class RagService:
 
         log.info("rag_sync_building_texts", count=len(all_products))
 
-
         # 2. Build embedding texts
         texts = [p.to_embedding_text() for p in all_products]
 
         # 3. Embed ALL texts in a background thread (Prevents server freezing!)
         try:
             loop = asyncio.get_running_loop()
-            vectors = await loop.run_in_executor(
-                None, 
-                lambda: embedder.embed_batch(texts) 
-            )
+            vectors = await loop.run_in_executor(None, lambda: embedder.embed_batch(texts))
         except Exception as e:
             log.error("rag_sync_embed_error", error=str(e))
             return 0
@@ -525,8 +559,6 @@ class RagService:
         )
         return indexed_products
 
-
-
     # ── Search ────────────────────────────────────────────────────────────────
     async def search_products(
         self,
@@ -545,7 +577,7 @@ class RagService:
         if not self._sync_complete:
             log.warning("rag_search_collection_not_ready_yet")
             return []
-        
+
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
         loop = asyncio.get_running_loop()
         try:
@@ -581,9 +613,7 @@ class RagService:
         strict_category = self._strict_category_for_query(query)
         if strict_category:
             constrained_results = [
-                product
-                for product in search_results
-                if strict_category in product.category_names
+                product for product in search_results if strict_category in product.category_names
             ]
             if constrained_results:
                 log.info(
@@ -597,15 +627,14 @@ class RagService:
 
         reranked_results = self._rerank_products_for_query(query, search_results)
         return reranked_results[:limit]
-    
+
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     @property
     def is_ready(self) -> bool:
         """True when catalog has been synced at least once."""
         return self._sync_complete
-    
-    
+
     def stats(self) -> dict[str, Any]:
         """Return current sync status and indexed product count."""
         return {
