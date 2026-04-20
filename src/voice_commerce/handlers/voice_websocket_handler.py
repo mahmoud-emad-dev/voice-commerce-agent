@@ -19,7 +19,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler 
 from voice_commerce.core.voice  import audio_processor 
-from voice_commerce.core.tools import tool_dispatcher, cart_tools
+from voice_commerce.core.tools import tool_dispatcher, cart_tools, checkout_tools
 from voice_commerce.core.actions.action_dispatcher import ActionDispatcher
 
 log = structlog.get_logger(__name__)
@@ -266,6 +266,8 @@ class VoiceWebSocketHandler:
                         page = parsed.get("page", {})
                         cart_items = parsed.get("cart_items", [])
                         cart_tools.sync_cart_from_browser(self.session_id, cart_items)
+                        if checkout_tools.invalidate_checkout_if_cart_changed(self.session_id, cart_items):
+                            await self._send_json({"type": "action", "action": "close_checkout"})
 
                         await gemini.inject_live_context(
                             page=page,
@@ -286,6 +288,8 @@ class VoiceWebSocketHandler:
                         page = parsed.get("page", {})
                         if "cart_items" in page:
                             cart_tools.sync_cart_from_browser(self.session_id, page.get("cart_items", []))
+                            if checkout_tools.invalidate_checkout_if_cart_changed(self.session_id, page.get("cart_items", [])):
+                                await self._send_json({"type": "action", "action": "close_checkout"})
                         log.info("context_update_received", session_id=self.session_id , filters=parsed.get("page", {}).get("active_filters", []) , items=len(parsed.get("products", [])))
                         log.info("context_update_received", parsed=parsed)
                         log.info("context_update_received", page=parsed.get("page", {}), products=parsed.get("products", []))

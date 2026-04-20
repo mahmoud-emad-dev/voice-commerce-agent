@@ -224,6 +224,84 @@ REMOVE_FROM_CART_TOOL = types.Tool(
     ]
 )
 
+BEGIN_CHECKOUT_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="begin_checkout",
+            description=(
+                "Start the demo checkout flow for the current cart. "
+                "Call this when the customer asks to check out, buy now, purchase, or place an order. "
+                "If the cart is empty, this returns an error and checkout should not continue."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+            ),
+        )
+    ]
+)
+
+SET_CHECKOUT_OPTION_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="set_checkout_option",
+            description=(
+                "Set one demo checkout option after checkout has already started. "
+                "Use field='shipping' with value='standard' or 'express'. "
+                "Use field='payment' with value='card' or 'paypal'. "
+                "Do not invent other values."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "field": types.Schema(
+                        type=types.Type.STRING,
+                        enum=["shipping", "payment"],
+                        description="Which checkout field to set.",
+                    ),
+                    "value": types.Schema(
+                        type=types.Type.STRING,
+                        enum=["standard", "express", "card", "paypal"],
+                        description="The chosen enum value for the field.",
+                    ),
+                },
+                required=["field", "value"],
+            ),
+        )
+    ]
+)
+
+CONFIRM_CHECKOUT_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="confirm_checkout",
+            description=(
+                "Finalize the demo checkout after both shipping and payment are already chosen. "
+                "Only call this after the user explicitly says place order, confirm, go ahead, or another clear final confirmation."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+            ),
+        )
+    ]
+)
+
+CANCEL_CHECKOUT_TOOL = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="cancel_checkout",
+            description=(
+                "Cancel the active demo checkout if the customer changes their mind or says never mind."
+            ),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+            ),
+        )
+    ]
+)
+
 
 # =============================================================================
 # REGISTRY — the list exported to gemini_live_handler.py
@@ -242,6 +320,10 @@ ALL_TOOLS: list[types.Tool] = [
     ADD_TO_CART_TOOL,
     SHOW_CART_TOOL,
     REMOVE_FROM_CART_TOOL,
+    BEGIN_CHECKOUT_TOOL,
+    SET_CHECKOUT_OPTION_TOOL,
+    CONFIRM_CHECKOUT_TOOL,
+    CANCEL_CHECKOUT_TOOL,
 ]
 
 

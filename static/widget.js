@@ -1745,6 +1745,8 @@
      *   show_products         — render product cards in chat panel
      *   navigate_to           — navigate to a URL (for search results pages)
      *   apply_filter          — set a price/category filter on the store page
+     *   render_checkout       — render demo checkout wizard from full state
+     *   close_checkout        — close demo checkout wizard
      * ══════════════════════════════════════════════════════════════════════════ */
 
     function _onAction(msg) {
@@ -1785,6 +1787,14 @@
                 break;
             case 'close_cart':
                 _doCloseCart();
+                break;
+            case 'render_checkout':
+                _closeModal();
+                _doCloseCart();
+                _doRenderCheckout(msg.checkout);
+                break;
+            case 'close_checkout':
+                _doCloseCheckout();
                 break;
             case 'show_product_modal':
                 var _modalDelay = (msg.delay_ms && msg.delay_ms > 0) ? msg.delay_ms : 0;
@@ -2252,6 +2262,21 @@ function _flushQueuedHighlights() {
     /* ── close_cart ─────────────────────────────────────────────────────────── */
     function _doCloseCart() {
         _store.closeCart();
+    }
+
+    /* ── checkout rendering (demo only) ───────────────────────────────────── */
+    function _doRenderCheckout(checkout) {
+        if (window.__VC_EMBED_DEMO__ === true && typeof window.vcRenderCheckout === 'function') {
+            window.vcRenderCheckout(checkout || {});
+            return;
+        }
+        _showToast('Demo checkout is only available on the embed demo page.', 'info', 2500);
+    }
+
+    function _doCloseCheckout() {
+        if (window.__VC_EMBED_DEMO__ === true && typeof window.vcCloseCheckout === 'function') {
+            window.vcCloseCheckout();
+        }
     }
 
     /* ── show_product_modal ──────────────────────────────────────────────────── */

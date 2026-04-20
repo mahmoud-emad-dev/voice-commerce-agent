@@ -1,0 +1,1 @@
+"""Session-scoped checkout state."""

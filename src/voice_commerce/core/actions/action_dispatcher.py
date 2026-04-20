@@ -12,8 +12,10 @@ from voice_commerce.core.actions.browser_actions import (
     SetSearchQuery,
     apply_filter,
     apply_sort,
+    close_checkout,
     highlight,
     notify,
+    render_checkout,
     update_badge,
     add_to_real_cart,
     open_cart,
@@ -97,8 +99,16 @@ def _infer_filter_actions(
         "sweatshirts": "Hoodies & Sweatshirts",
         "pant": "Pants",
         "pants": "Pants",
+        "t-shirt": "Tees",
+        "t-shirts": "Tees",
+        "t shirt": "Tees",
+        "t shirts": "Tees",
+        "tshirt": "Tees",
+        "tshirts": "Tees",
         "tee": "Tees",
         "tees": "Tees",
+        "shirt": "Tees",
+        "shirts": "Tees",
         "tank": "Tanks",
         "tanks": "Tanks",
         "watch": "Watches",
@@ -351,6 +361,37 @@ class ActionDispatcher:
             update_badge(cart_count),
             open_cart(),
         ]
+
+    def _on_begin_checkout(
+        self, tool_args: dict[str, Any], tool_result: dict[str, Any]
+    ) -> list[BrowserAction]:
+        cart_count = tool_result.get("cart_count", 0)
+        checkout = tool_result.get("checkout", {})
+        return [
+            update_badge(cart_count),
+            render_checkout(checkout),
+        ]
+
+    def _on_set_checkout_option(
+        self, tool_args: dict[str, Any], tool_result: dict[str, Any]
+    ) -> list[BrowserAction]:
+        checkout = tool_result.get("checkout", {})
+        return [render_checkout(checkout)]
+
+    def _on_confirm_checkout(
+        self, tool_args: dict[str, Any], tool_result: dict[str, Any]
+    ) -> list[BrowserAction]:
+        checkout = tool_result.get("checkout", {})
+        cart_count = tool_result.get("cart_count", 0)
+        return [
+            update_badge(cart_count),
+            render_checkout(checkout),
+        ]
+
+    def _on_cancel_checkout(
+        self, tool_args: dict[str, Any], tool_result: dict[str, Any]
+    ) -> list[BrowserAction]:
+        return [close_checkout()]
 
     # def _on_clear_cart(
     #     self, args: dict, result: dict

@@ -94,6 +94,22 @@ class CloseCart(_ActionBase):
     action: Literal["close_cart"] = "close_cart"
 
 
+class RenderCheckout(_ActionBase):
+    """
+    Render the full demo checkout state in the browser.
+    The frontend treats this as the single source of truth for the checkout UI.
+    """
+
+    action: Literal["render_checkout"] = "render_checkout"
+    checkout: dict
+
+
+class CloseCheckout(_ActionBase):
+    """Close the active demo checkout UI."""
+
+    action: Literal["close_checkout"] = "close_checkout"
+
+
 ## Other Actions
 class ShowProductModal(_ActionBase):
     """
@@ -173,6 +189,8 @@ BrowserAction = Annotated[
         ShowNotification,
         OpenCart,
         CloseCart,
+        RenderCheckout,
+        CloseCheckout,
         ShowProductModal,
         SetSearchQuery,
         ApplyFilter,
@@ -230,6 +248,14 @@ def add_to_real_cart(product_id: int, quantity: int = 1) -> AddToRealCart:
 
 def open_cart() -> OpenCart:
     return OpenCart()
+
+
+def render_checkout(checkout: dict) -> RenderCheckout:
+    return RenderCheckout(checkout=checkout)
+
+
+def close_checkout() -> CloseCheckout:
+    return CloseCheckout()
 
 
 def apply_filter(

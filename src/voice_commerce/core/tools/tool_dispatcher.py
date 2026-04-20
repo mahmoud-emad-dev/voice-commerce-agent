@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import structlog
 from google.genai import types
 
-from voice_commerce.core.tools import tool_registry , cart_tools, product_tools
+from voice_commerce.core.tools import tool_registry , cart_tools, checkout_tools, product_tools
 from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
@@ -32,6 +32,10 @@ _TOOLS: dict[str, Any] = {
     "add_to_cart": cart_tools.add_to_cart,
     "show_cart": cart_tools.show_cart,
     "remove_from_cart": cart_tools.remove_from_cart,
+    "begin_checkout": checkout_tools.begin_checkout,
+    "set_checkout_option": checkout_tools.set_checkout_option,
+    "confirm_checkout": checkout_tools.confirm_checkout,
+    "cancel_checkout": checkout_tools.cancel_checkout,
 }
 
 
