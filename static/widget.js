@@ -583,20 +583,20 @@
         '  border-radius: var(--vc-radius-sm);',
         '  animation: vc-highlight-ring 0.9s ease-out;',
         '}',
-        '.vc-highlight-secondary {',
+'.vc-highlight-secondary {',
         '  position: relative !important;',
         '  z-index: 50 !important;',
         '  outline: none !important;',
         '  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.10), 0 0 18px rgba(99, 102, 241, 0.20) !important;',
         '  opacity: 1;',
-        '  transition: all 0.35s ease !important;',
+        '  transition: all 0.6s ease !important;',
         '  border-radius: var(--vc-radius-sm);',
         '}',
-        '.vc-highlight-fade {',
+'.vc-highlight-fade {',
             '  outline: none !important;',
             '  box-shadow: none !important;',
             '  transform: none !important;',
-            '  transition: all 0.7s ease !important;',
+            '  transition: all 1.2s ease !important;',
         '}',
         '.vc-highlight-badge {',
         '  position: absolute !important;',
@@ -1845,7 +1845,7 @@ case 'apply_filter':
     var _vcQueuedHighlights = [];
     var _vcHighlightBatchTimer = null;
     var _vcLastScrollAt = 0;
-    var _vcLastHighlightDelayMs = 1500;
+    var _vcLastHighlightDelayMs = 2500;
     var _vcModalAutoCloseTimer = null;
 
     function _clearProductFocusState() {}
@@ -1928,7 +1928,7 @@ case 'apply_filter':
 
     function _scrollIntoViewSequenced(el, forceScroll) {
         if (!el) return;
-        var MIN_SCROLL_GAP_MS = Math.max(1800, _vcLastHighlightDelayMs - 150);
+        var MIN_SCROLL_GAP_MS = Math.max(2800, _vcLastHighlightDelayMs - 200);
         var now = Date.now();
         var waitMs = Math.max(0, MIN_SCROLL_GAP_MS - (now - _vcLastScrollAt));
         setTimeout(function () {
@@ -2357,7 +2357,7 @@ function _flushQueuedHighlights() {
         }
         _vcQueuedHighlights = [];
         _vcLastScrollAt = 0;
-        _vcLastHighlightDelayMs = 1500;
+        _vcLastHighlightDelayMs = 2500;
 
         var selector = '.vc-highlight-primary, .vc-highlight-secondary, .vc-highlight-fade, .vc-highlighted';
         document.querySelectorAll(selector).forEach(function (el) {
