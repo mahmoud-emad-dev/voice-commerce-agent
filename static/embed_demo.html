@@ -756,11 +756,13 @@
       z-index: 10;
     }
 
-    /* Hide badges when modal is open */
-    .modal-overlay.open ~ .products .product-badges,
-    .modal-overlay.open + .products .product-badges,
-    .modal-overlay.open ~ * .product-badges {
-      display: none;
+    /* Hide sale/new badges whenever a product modal is open.
+       This stops them showing through blurred overlays. */
+    body.product-modal-open .product-badges,
+    body.vc-product-modal-open .product-badges {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
     }
 
     .badge {
@@ -2730,15 +2732,13 @@
 
       document.getElementById('product-modal').classList.add('open');
       document.body.style.overflow = 'hidden';
-      // Hide product badges when modal is open
-      document.querySelectorAll('.product-badges').forEach(el => el.style.display = 'none');
+      document.body.classList.add('product-modal-open');
     }
 
     function closeModal() {
       document.getElementById('product-modal').classList.remove('open');
       document.body.style.overflow = '';
-      // Show product badges again
-      document.querySelectorAll('.product-badges').forEach(el => el.style.display = '');
+      document.body.classList.remove('product-modal-open');
     }
 
     function prevImg() {
