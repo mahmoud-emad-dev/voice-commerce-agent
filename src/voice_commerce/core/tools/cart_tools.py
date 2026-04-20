@@ -70,6 +70,18 @@ def sync_cart_from_browser(session_id: str, items: list[dict[str, Any]]) -> Cart
     return cart
 
 
+def get_cart(session_id: str) -> Cart:
+    """Public accessor for the current session cart."""
+    return _get_cart(session_id)
+
+
+def clear_cart(session_id: str) -> Cart:
+    """Empty the current session cart and return it."""
+    cart = _get_cart(session_id)
+    cart.items.clear()
+    return cart
+
+
 # Tools methods
 
 async def add_to_cart( product_id: int,quantity: int = 1, session_id: str = "default") -> ToolResponse:
