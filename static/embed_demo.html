@@ -1408,7 +1408,8 @@
     .checkout-overlay {
       position: fixed;
       inset: 0;
-      z-index: 1100;
+      /* Must sit above the floating voice widget, which uses a near-max z-index. */
+      z-index: 2147483646;
       background: rgba(14, 13, 11, 0.7);
       display: none;
       align-items: center;
@@ -1425,20 +1426,20 @@
       background: var(--c-surface);
       border-radius: var(--r-lg);
       width: 100%;
-      max-width: 580px;
-      max-height: 88vh;
+      max-width: 760px;
+      max-height: 90vh;
       overflow-y: auto;
-      padding: 36px;
+      padding: 24px;
       position: relative;
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      box-shadow: 0 28px 96px rgba(0, 0, 0, 0.38);
       animation: slideUp 0.3s cubic-bezier(.34, 1.56, .64, 1);
     }
 
     .checkout-title {
       font-family: var(--f-display);
-      font-size: 24px;
+      font-size: 26px;
       font-weight: 700;
-      margin-bottom: 24px;
+      margin-bottom: 10px;
     }
 
     .checkout-section-title {
@@ -1493,10 +1494,14 @@
     }
 
     .checkout-order-summary {
-      background: var(--c-surface2);
-      border-radius: var(--r);
-      padding: 16px;
-      margin: 20px 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 244, 238, 0.92));
+      border: 1px solid rgba(217, 211, 202, 0.92);
+      border-radius: calc(var(--r) + 2px);
+      padding: 18px;
+      margin: 0;
+      position: sticky;
+      top: 0;
+      box-shadow: 0 10px 28px rgba(17, 24, 39, 0.06);
     }
 
     .checkout-total-row {
@@ -1535,6 +1540,375 @@
     .place-order-btn:hover {
       background: var(--c-accent-dk);
       transform: translateY(-2px);
+    }
+
+    .checkout-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .checkout-demo-badge {
+      display: inline-flex;
+      align-self: flex-start;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(17, 24, 39, 0.06);
+      color: var(--c-ink);
+      border: 1px solid rgba(17, 24, 39, 0.08);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .checkout-subtitle {
+      margin-top: 0;
+      color: var(--c-ink3);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .checkout-progress {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .checkout-progress-step {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .checkout-progress-bar {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--c-border);
+      overflow: hidden;
+    }
+
+    .checkout-progress-bar span {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--c-accent), #4f7ef0);
+      transform-origin: left center;
+      transform: scaleX(0);
+      transition: transform var(--t-mid);
+    }
+
+    .checkout-progress-step.is-active .checkout-progress-bar span,
+    .checkout-progress-step.is-complete .checkout-progress-bar span {
+      transform: scaleX(1);
+    }
+
+    .checkout-progress-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--c-ink3);
+    }
+
+    .checkout-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(250px, 300px);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .checkout-main {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .checkout-side {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .checkout-progress-step.is-active .checkout-progress-label,
+    .checkout-progress-step.is-complete .checkout-progress-label {
+      color: var(--c-ink);
+    }
+
+    .checkout-hero-card,
+    .checkout-profile-card,
+    .checkout-choice-card {
+      border: 1px solid rgba(216, 209, 200, 0.92);
+      border-radius: var(--r-lg);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 245, 240, 0.92));
+      padding: 16px;
+      box-shadow: 0 10px 26px rgba(17, 24, 39, 0.05);
+    }
+
+    .checkout-hero-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .checkout-hero-title {
+      font-family: var(--f-display);
+      font-size: 21px;
+      line-height: 1.15;
+    }
+
+    .checkout-hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--c-ink3);
+      font-size: 12px;
+    }
+
+    .checkout-hero-meta span {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(17, 24, 39, 0.04);
+      border: 1px solid rgba(17, 24, 39, 0.06);
+    }
+
+    .checkout-line-items {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 188px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .checkout-line-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: baseline;
+      font-size: 13.5px;
+    }
+
+    .checkout-line-item strong {
+      color: var(--c-ink);
+      font-weight: 600;
+    }
+
+    .checkout-card-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--c-ink3);
+      margin-bottom: 10px;
+    }
+
+    .checkout-step-card {
+      border-color: rgba(26, 86, 219, 0.24);
+      box-shadow: 0 0 0 1px rgba(26, 86, 219, 0.06), 0 14px 32px rgba(26, 86, 219, 0.10);
+    }
+
+    .checkout-step-helper {
+      font-size: 13px;
+      color: var(--c-ink2);
+      line-height: 1.55;
+      margin: 0 0 12px;
+    }
+
+    .checkout-profile-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .checkout-profile-field {
+      border: 1px solid rgba(226, 221, 214, 0.9);
+      border-radius: var(--r);
+      background: rgba(255, 255, 255, 0.82);
+      padding: 11px 12px;
+      min-height: 66px;
+    }
+
+    .checkout-profile-field.full {
+      grid-column: 1 / -1;
+    }
+
+    .checkout-profile-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--c-ink3);
+      margin-bottom: 8px;
+    }
+
+    .checkout-profile-value {
+      font-size: 14px;
+      color: var(--c-ink);
+      line-height: 1.45;
+      min-height: 1.45em;
+    }
+
+    .checkout-profile-value.is-animating {
+      animation: checkoutFillPulse 0.9s ease;
+    }
+
+    @keyframes checkoutFillPulse {
+      0% {
+        opacity: 0.2;
+        transform: translateY(4px);
+      }
+
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .checkout-choice-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .checkout-choice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      width: 100%;
+      border: 1.5px solid rgba(214, 206, 196, 0.95);
+      border-radius: var(--r);
+      background: rgba(255, 255, 255, 0.96);
+      padding: 13px 14px;
+      cursor: pointer;
+      transition: border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+      text-align: left;
+    }
+
+    .checkout-choice:hover {
+      border-color: var(--c-accent);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 22px rgba(26, 86, 219, 0.08);
+    }
+
+    .checkout-choice.is-selected {
+      border-color: var(--c-accent);
+      box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.12);
+    }
+
+    .checkout-choice-main strong {
+      display: block;
+      font-size: 14px;
+      color: var(--c-ink);
+      margin-bottom: 4px;
+    }
+
+    .checkout-choice-main span {
+      display: block;
+      font-size: 12.5px;
+      color: var(--c-ink3);
+    }
+
+    .checkout-choice-price {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--c-ink);
+      white-space: nowrap;
+    }
+
+    .checkout-confirm-copy {
+      font-size: 14px;
+      color: var(--c-ink2);
+      line-height: 1.7;
+    }
+
+    .checkout-action-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .checkout-secondary-btn {
+      flex: 1;
+      min-width: 180px;
+      background: transparent;
+      border: 1.5px solid var(--c-border);
+      color: var(--c-ink2);
+      border-radius: var(--r);
+      padding: 13px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: border-color var(--t-fast), color var(--t-fast), transform var(--t-fast);
+    }
+
+    .checkout-secondary-btn:hover {
+      border-color: var(--c-ink);
+      color: var(--c-ink);
+      transform: translateY(-1px);
+    }
+
+    .checkout-success-card {
+      text-align: center;
+      border: 1px solid rgba(22, 122, 74, 0.16);
+      border-radius: calc(var(--r-lg) + 2px);
+      background: linear-gradient(180deg, rgba(240, 253, 244, 0.98), rgba(255, 255, 255, 0.94));
+      padding: 28px 24px;
+    }
+
+    .checkout-success-badge {
+      display: inline-flex;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(22, 122, 74, 0.1);
+      color: var(--c-success);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    .checkout-success-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      margin: 0 auto 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(22, 122, 74, 0.12);
+      color: var(--c-success);
+      font-size: 34px;
+    }
+
+    .checkout-success-card h3 {
+      font-family: var(--f-display);
+      font-size: 26px;
+      margin-bottom: 10px;
+    }
+
+    .checkout-success-card p {
+      color: var(--c-ink2);
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 8px;
+    }
+
+    .checkout-success-order {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: white;
+      border: 1px solid rgba(22, 122, 74, 0.14);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--c-ink);
+      margin: 12px 0 18px;
     }
 
     /* ═══════════════════════════════════════════════════════════════════════
@@ -1788,6 +2162,22 @@
 
       .checkout-grid {
         grid-template-columns: 1fr;
+      }
+
+      .checkout-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .checkout-progress {
+        grid-template-columns: 1fr;
+      }
+
+      .checkout-profile-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .checkout-order-summary {
+        position: static;
       }
     }
 
@@ -2191,6 +2581,8 @@
       modalImgs: [],
       modalImgIndex: 0,
       modalProductId: null,
+      checkoutView: null,
+      checkoutAutoCloseTimer: null,
     };
 
     /* ═══════════════ 3. RENDERING ══════════════════════════════════════ */
@@ -2777,125 +3169,290 @@
 
     function openCheckout() {
       closeCart();
-      const items = Object.values(STATE.cart);
-      const subtotal = items.reduce((s, i) => s + (i.product.sale || i.product.price) * i.qty, 0);
-      const shipping = subtotal >= 75 ? 0 : 9.99;
-      const tax = subtotal * 0.08;
-      const total = subtotal + shipping + tax;
-
-      const summary = items.map(i => `
-    <div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0">
-      <span>${esc(i.product.name)} × ${i.qty}</span>
-      <span>$${((i.product.sale || i.product.price) * i.qty).toFixed(2)}</span>
-    </div>
-  `).join('');
-
-      document.getElementById('checkout-box').innerHTML = `
-    <button class="modal-close" onclick="closeCheckout()">✕</button>
-    <h2 class="checkout-title">Checkout</h2>
-
-    <div class="checkout-section-title">Contact Information</div>
-    <div class="checkout-grid">
-      <div class="form-field">
-        <label class="form-label">First Name</label>
-        <input type="text" class="form-input" placeholder="John">
-      </div>
-      <div class="form-field">
-        <label class="form-label">Last Name</label>
-        <input type="text" class="form-input" placeholder="Doe">
-      </div>
-      <div class="form-field full">
-        <label class="form-label">Email Address</label>
-        <input type="email" class="form-input" placeholder="john@example.com">
-      </div>
-      <div class="form-field full">
-        <label class="form-label">Phone</label>
-        <input type="tel" class="form-input" placeholder="+1 (555) 000-0000">
-      </div>
-    </div>
-
-    <div class="checkout-section-title">Shipping Address</div>
-    <div class="checkout-grid">
-      <div class="form-field full">
-        <label class="form-label">Street Address</label>
-        <input type="text" class="form-input" placeholder="123 Main Street">
-      </div>
-      <div class="form-field">
-        <label class="form-label">City</label>
-        <input type="text" class="form-input" placeholder="New York">
-      </div>
-      <div class="form-field">
-        <label class="form-label">ZIP Code</label>
-        <input type="text" class="form-input" placeholder="10001">
-      </div>
-    </div>
-
-    <div class="checkout-section-title">Payment</div>
-    <div class="checkout-grid">
-      <div class="form-field full">
-        <label class="form-label">Card Number</label>
-        <input type="text" class="form-input" placeholder="4242 4242 4242 4242" maxlength="19">
-      </div>
-      <div class="form-field">
-        <label class="form-label">Expiry</label>
-        <input type="text" class="form-input" placeholder="MM / YY">
-      </div>
-      <div class="form-field">
-        <label class="form-label">CVC</label>
-        <input type="text" class="form-input" placeholder="123" maxlength="4">
-      </div>
-    </div>
-
-    <div class="checkout-section-title">Order Summary</div>
-    <div class="checkout-order-summary">
-      ${summary}
-      <div class="checkout-total-row">
-        <span>Subtotal</span><span>$${subtotal.toFixed(2)}</span>
-      </div>
-      <div class="checkout-total-row">
-        <span>Shipping</span>
-        <span>${shipping === 0 ? '<span style="color:var(--c-success)">FREE</span>' : '$' + shipping.toFixed(2)}</span>
-      </div>
-      <div class="checkout-total-row">
-        <span>Tax (8%)</span><span>$${tax.toFixed(2)}</span>
-      </div>
-      <div class="checkout-total-row total">
-        <span>Total</span><span>$${total.toFixed(2)}</span>
-      </div>
-    </div>
-
-    <button class="place-order-btn" onclick="placeOrder()">
-      Place Order — $${total.toFixed(2)}
-    </button>
-    <p style="text-align:center;font-size:12px;color:var(--c-ink3);margin-top:12px">
-      🔒 Secure demo checkout — no real payment will be charged
-    </p>
-  `;
-
-      document.getElementById('checkout-overlay').classList.add('open');
-      document.body.style.overflow = 'hidden';
+      if (window.VoiceCommerce && typeof window.VoiceCommerce.send === 'function') {
+        window.VoiceCommerce.send('checkout');
+        return;
+      }
+      showToast('Voice assistant is not ready yet. Open the widget and ask to checkout.', 'info');
     }
 
-    function closeCheckout() {
+    function closeCheckout(notifyAssistant = true) {
+      if (STATE.checkoutAutoCloseTimer) {
+        clearTimeout(STATE.checkoutAutoCloseTimer);
+        STATE.checkoutAutoCloseTimer = null;
+      }
       document.getElementById('checkout-overlay').classList.remove('open');
       document.body.style.overflow = '';
+      STATE.checkoutView = null;
+      if (notifyAssistant && window.VoiceCommerce && typeof window.VoiceCommerce.send === 'function') {
+        window.VoiceCommerce.send('cancel checkout');
+      }
     }
 
-    function placeOrder() {
-      document.getElementById('checkout-box').innerHTML = `
-    <div class="order-success">
-      <div class="checkmark">✓</div>
-      <h3>Order Placed!</h3>
-      <p>Thanks for your demo order. This is a portfolio demo.</p>
-      <p style="margin-top:8px;font-size:13px;color:var(--c-ink3)">Order #DEMO-${Math.floor(Math.random() * 99999)}</p>
-      <button class="btn-primary" style="margin-top:24px" onclick="closeCheckout();STATE.cart={};updateCartUI();renderCartDrawer();">
-        Continue Shopping
-      </button>
-    </div>
-  `;
-      STATE.cart = {};
-      updateCartUI();
+    function formatMoney(amount) {
+      return `$${Number(amount || 0).toFixed(2)}`;
     }
+
+    function sendCheckoutCommand(command) {
+      if (window.VoiceCommerce && typeof window.VoiceCommerce.send === 'function') {
+        window.VoiceCommerce.send(command);
+        return;
+      }
+      showToast('Voice assistant is not ready yet.', 'info');
+    }
+
+    function checkoutStepIndex(step) {
+      return ['review', 'shipping', 'payment', 'confirm', 'success'].indexOf(step);
+    }
+
+    function renderCheckoutProgress(step) {
+      const steps = [
+        { key: 'review', label: 'Review' },
+        { key: 'shipping', label: 'Shipping' },
+        { key: 'payment', label: 'Payment' },
+        { key: 'confirm', label: 'Confirm' },
+        { key: 'success', label: 'Done' },
+      ];
+      const current = Math.max(0, checkoutStepIndex(step));
+
+      return `<div class="checkout-progress">${steps.map((item, index) => {
+        const stateClass = index < current ? 'is-complete' : index === current ? 'is-active' : '';
+        return `
+          <div class="checkout-progress-step ${stateClass}">
+            <div class="checkout-progress-bar"><span></span></div>
+            <div class="checkout-progress-label">${item.label}</div>
+          </div>
+        `;
+      }).join('')}</div>`;
+    }
+
+    function renderCheckoutLineItems(items) {
+      return (items || []).map(item => `
+        <div class="checkout-line-item">
+          <span><strong>${esc(item.name)}</strong> × ${Number(item.quantity || 0)}</span>
+          <span>${formatMoney(item.subtotal)}</span>
+        </div>
+      `).join('');
+    }
+
+    function renderCheckoutSummary(totals) {
+      const shippingValue = Number(totals.shipping || 0) === 0
+        ? '<span style="color:var(--c-success);font-weight:700">FREE</span>'
+        : formatMoney(totals.shipping);
+      return `
+        <div class="checkout-order-summary">
+          <div class="checkout-total-row"><span>Subtotal</span><span>${formatMoney(totals.subtotal)}</span></div>
+          <div class="checkout-total-row"><span>Shipping</span><span>${shippingValue}</span></div>
+          <div class="checkout-total-row"><span>Tax (8%)</span><span>${formatMoney(totals.tax)}</span></div>
+          <div class="checkout-total-row total"><span>Total</span><span>${formatMoney(totals.total)}</span></div>
+        </div>
+      `;
+    }
+
+    function renderCheckoutProfile(profile) {
+      return `
+        <div class="checkout-profile-card">
+          <div class="checkout-card-title">Prefilled Demo Profile</div>
+          <div class="checkout-profile-grid">
+            <div class="checkout-profile-field">
+              <div class="checkout-profile-label">Name</div>
+              <div class="checkout-profile-value" data-checkout-fill>${esc(profile.first_name)} ${esc(profile.last_name)}</div>
+            </div>
+            <div class="checkout-profile-field">
+              <div class="checkout-profile-label">Phone</div>
+              <div class="checkout-profile-value" data-checkout-fill>${esc(profile.phone)}</div>
+            </div>
+            <div class="checkout-profile-field full">
+              <div class="checkout-profile-label">Email</div>
+              <div class="checkout-profile-value" data-checkout-fill>${esc(profile.email)}</div>
+            </div>
+            <div class="checkout-profile-field full">
+              <div class="checkout-profile-label">Address</div>
+              <div class="checkout-profile-value" data-checkout-fill>${esc(profile.address_1)}, ${esc(profile.city)}, ${esc(profile.state)} ${esc(profile.zip)}, ${esc(profile.country)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderCheckoutChoices(title, options, selectedValue, commandPrefix, stepKey, helperText) {
+      return `
+        <div class="checkout-choice-card checkout-step-card" data-step-panel="${esc(stepKey)}">
+          <div class="checkout-card-title">${title}</div>
+          ${helperText ? `<p class="checkout-step-helper">${esc(helperText)}</p>` : ''}
+          <div class="checkout-choice-grid">
+            ${options.map(option => {
+              const selected = option.value === selectedValue ? 'is-selected' : '';
+              const label = option.label || option.value;
+              const subtitle = option.description || '';
+              const price = option.value === 'express' ? '$14.99' : option.value === 'standard' ? 'Auto-calculated' : '';
+              const command = commandPrefix === 'shipping'
+                ? `${option.value} shipping`
+                : option.value === 'paypal'
+                  ? 'pay with paypal'
+                  : 'pay with card';
+              return `
+                <button class="checkout-choice ${selected}" onclick="sendCheckoutCommand('${command}')">
+                  <span class="checkout-choice-main">
+                    <strong>${esc(label)}</strong>
+                    <span>${esc(subtitle)}</span>
+                  </span>
+                  <span class="checkout-choice-price">${esc(price)}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderCheckoutConfirm(checkout) {
+      const shippingLabel = checkout.shipping === 'express' ? 'Express shipping' : 'Standard shipping';
+      const paymentLabel = checkout.payment === 'paypal' ? 'PayPal' : 'Card';
+      return `
+        <div class="checkout-choice-card checkout-step-card" data-step-panel="confirm">
+          <div class="checkout-card-title">Ready for Demo Order</div>
+          <p class="checkout-confirm-copy">
+            You are placing a demo order for ${formatMoney(checkout.totals.total)} with ${esc(shippingLabel)} and ${esc(paymentLabel)}.
+            Say "place order" to confirm, or use the button below.
+          </p>
+          <div class="checkout-action-row">
+            <button class="place-order-btn" onclick="sendCheckoutCommand('place order')">Place Demo Order</button>
+            <button class="checkout-secondary-btn" onclick="sendCheckoutCommand('cancel checkout')">Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function scheduleCheckoutFieldAnimations() {
+      document.querySelectorAll('[data-checkout-fill]').forEach((el, index) => {
+        el.classList.remove('is-animating');
+        setTimeout(() => el.classList.add('is-animating'), 70 * (index + 1));
+      });
+    }
+
+    function focusCheckoutStep(step) {
+      const box = document.getElementById('checkout-box');
+      if (!box) return;
+      const target = box.querySelector(`[data-step-panel="${step}"]`) || box.querySelector('.checkout-success-card');
+      if (!target) {
+        box.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      const top = target.offsetTop - 12;
+      box.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+
+    window.vcRenderCheckout = function (checkoutState) {
+      const checkout = checkoutState || {};
+      const profile = checkout.profile || {};
+      const step = checkout.step || 'review';
+      const box = document.getElementById('checkout-box');
+      if (!box) return;
+
+      if (STATE.checkoutAutoCloseTimer) {
+        clearTimeout(STATE.checkoutAutoCloseTimer);
+        STATE.checkoutAutoCloseTimer = null;
+      }
+
+      STATE.checkoutView = checkout;
+
+      let bodyHtml = `
+        <div class="checkout-shell">
+          <button class="modal-close" onclick="closeCheckout()">✕</button>
+          <span class="checkout-demo-badge">${step === 'success' ? 'Demo Order' : 'Demo Checkout'}</span>
+          <h2 class="checkout-title">${step === 'success' ? 'Demo Order Confirmed' : 'Guided Checkout'}</h2>
+          <p class="checkout-subtitle">${esc(checkout.demo_notice || 'This is a demo flow. No real payment will be processed.')}</p>
+          ${renderCheckoutProgress(step)}
+      `;
+
+      if (step === 'success') {
+        bodyHtml += `
+          <div class="checkout-success-card">
+            <span class="checkout-success-badge">DEMO ORDER</span>
+            <div class="checkout-success-icon">✓</div>
+            <h3>Order placed for the demo</h3>
+            <p>Your checkout flow completed exactly as a recorded demo should.</p>
+            <div class="checkout-success-order">${esc(checkout.order_id || 'DEMO-ORDER')}</div>
+            <p>Shipping: ${esc(checkout.shipping === 'express' ? 'Express shipping' : 'Standard shipping')}</p>
+            <p>Payment: ${esc(checkout.payment === 'paypal' ? 'PayPal' : 'Card')}</p>
+            <p>Total: ${formatMoney(checkout.totals && checkout.totals.total)}</p>
+            <button class="place-order-btn" style="margin-top:18px" onclick="closeCheckout(false)">Continue Shopping</button>
+          </div>
+        `;
+        STATE.cart = {};
+        updateCartUI();
+        renderCartDrawer();
+        STATE.checkoutAutoCloseTimer = setTimeout(() => closeCheckout(false), 5000);
+      } else {
+        let activePanelHtml = '';
+        if (step === 'review' || step === 'shipping') {
+          activePanelHtml = renderCheckoutChoices(
+            'Shipping',
+            checkout.available_shipping_options || [],
+            checkout.shipping,
+            'shipping',
+            'shipping',
+            'Choose a shipping option for the demo order. Gemini will continue once you answer.'
+          );
+        }
+        if (step === 'payment') {
+          activePanelHtml = renderCheckoutChoices(
+            'Payment',
+            checkout.available_payment_options || [],
+            checkout.payment,
+            'payment',
+            'payment',
+            'Choose how the demo payment should be shown. No real payment will be processed.'
+          );
+        }
+        if (step === 'confirm') {
+          activePanelHtml = renderCheckoutConfirm(checkout);
+        }
+        if (step === 'review' && !activePanelHtml) {
+          activePanelHtml = renderCheckoutChoices(
+            'Shipping',
+            checkout.available_shipping_options || [],
+            checkout.shipping,
+            'shipping',
+            'shipping',
+            'Choose a shipping option for the demo order. Gemini will continue once you answer.'
+          );
+        }
+
+        bodyHtml += `
+          <div class="checkout-layout">
+            <div class="checkout-main">
+              <div class="checkout-hero-card">
+                <div class="checkout-hero-title">Cart ready for a voice-led checkout.</div>
+                <div class="checkout-hero-meta">
+                  <span>${(checkout.cart_snapshot || []).length} line items</span>
+                  <span>Total ${formatMoney(checkout.totals && checkout.totals.total)}</span>
+                  <span>Preset profile loaded</span>
+                </div>
+                <div class="checkout-line-items">${renderCheckoutLineItems(checkout.cart_snapshot || [])}</div>
+              </div>
+              ${activePanelHtml}
+              ${renderCheckoutProfile(profile)}
+            </div>
+            <div class="checkout-side">
+              ${renderCheckoutSummary(checkout.totals || {})}
+            </div>
+          </div>
+        `;
+      }
+
+      bodyHtml += '</div>';
+      box.innerHTML = bodyHtml;
+      document.getElementById('checkout-overlay').classList.add('open');
+      document.body.style.overflow = 'hidden';
+      scheduleCheckoutFieldAnimations();
+      requestAnimationFrame(() => focusCheckoutStep(step));
+    };
+
+    window.vcCloseCheckout = function () {
+      closeCheckout(false);
+    };
 
     /* ═══════════════ 8. TOAST ══════════════════════════════════════════ */
 
