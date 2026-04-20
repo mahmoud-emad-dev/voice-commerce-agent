@@ -1024,6 +1024,59 @@
         });
     }
 
+    function _demoActiveFilters() {
+        var filters = [];
+
+        var activePill = document.querySelector('.cat-pill.active');
+        if (activePill) {
+            var filterValue = activePill.getAttribute('data-filter') || '';
+            if (filterValue && filterValue.toLowerCase() !== 'all') {
+                filters.push(filterValue);
+            }
+        }
+
+        document.querySelectorAll('.f-cat:checked').forEach(function (el) {
+            if (el.value) filters.push(el.value);
+        });
+
+        var genderMap = {
+            'f-men': 'Men',
+            'f-women': 'Women',
+            'f-unisex': 'Unisex / Gear',
+        };
+        Object.keys(genderMap).forEach(function (id) {
+            var node = document.getElementById(id);
+            if (node && node.checked) {
+                filters.push(genderMap[id]);
+            }
+        });
+
+        var minInput = document.getElementById('f-min');
+        var maxInput = document.getElementById('f-max');
+        var minValue = minInput ? String(minInput.value || '').trim() : '';
+        var maxValue = maxInput ? String(maxInput.value || '').trim() : '';
+        if (minValue || maxValue) {
+            filters.push((minValue ? '$' + minValue : '$0') + ' - ' + (maxValue ? '$' + maxValue : 'max'));
+        }
+
+        var inStock = document.getElementById('f-instock');
+        if (inStock && inStock.checked) {
+            filters.push('In Stock Only');
+        }
+
+        var sortSelect = document.getElementById('sort-select');
+        if (sortSelect && sortSelect.value && sortSelect.value !== 'default') {
+            var selected = sortSelect.options[sortSelect.selectedIndex];
+            if (selected && selected.textContent) {
+                filters.push('Sort: ' + selected.textContent.trim());
+            }
+        }
+
+        return filters.filter(function (item, pos, arr) {
+            return item && arr.indexOf(item) === pos;
+        });
+    }
+
     function _sendContextUpdate() {
         if (STATE.wsStatus !== 'connected') return;
 
@@ -1033,18 +1086,20 @@
             realCartCount = Number(STATE.cartCount || 0);
         }
 
-        // 3. NEW: Scrape Active Filters & Categories!
         var activeFilters = [];
-        var activeNodes = document.querySelectorAll('.active, .current-cat, .current-menu-item');
-        for (var j = 0; j < activeNodes.length; j++) {
-            var text = activeNodes[j].textContent.trim();
-            // Ignore overly long text to avoid accidentally scraping huge containers
-            if (text && text.length < 30) {
+        if (window.__VC_EMBED_DEMO__ === true) {
+            activeFilters = _demoActiveFilters();
+        } else {
+            var activeNodes = document.querySelectorAll('.current-cat, .current-menu-item, [aria-current="page"], .filters .active, .woocommerce-widget-layered-nav-list__item--chosen');
+            for (var j = 0; j < activeNodes.length; j++) {
+                var text = String(activeNodes[j].textContent || '').replace(/\s+/g, ' ').trim();
+                if (!text || text.length >= 40 || /^\d+$/.test(text)) continue;
                 activeFilters.push(text);
             }
+            activeFilters = activeFilters.filter(function (item, pos) {
+                return activeFilters.indexOf(item) === pos;
+            });
         }
-        // Remove duplicates from the array
-        activeFilters = activeFilters.filter(function(item, pos) { return activeFilters.indexOf(item) == pos; });
 
         var pageContext = {
             title: document.title,
@@ -1183,7 +1238,6 @@
             try { msg = JSON.parse(event.data); } catch (e) { return; }
 
             // 2. Handle Browser Actions ("Ghost Hand")
-            // Python sends actions directly as {"action": "something"}, not inside a "type"
             if (msg.action) {
                 _onAction(msg);
                 return;
@@ -1767,9 +1821,17 @@
                 _closeModal();
                 if (msg.url) window.location.href = msg.url;
                 break;
-            case 'apply_filter':
+case 'apply_filter':
                 _closeModal();
-                _doApplyFilter(msg.filter_type, msg.filter_value);
+                _doApplyFilter(msg.filter_type, msg.value || msg.filter_value, msg.label);
+                break;
+            case 'apply_sort':
+                _closeModal();
+                _doApplySort(msg.sort_by, msg.label);
+                break;
+            case 'clear_highlights':
+                _closeModal();
+                _doClearHighlights();
                 break;
             default:
                 console.log('🔴 [DEBUG] Unknown action:', msg.action);
@@ -1862,23 +1924,11 @@
             top: clampedTop,
             behavior: 'smooth'
         });
-
-        // A second pass corrects final position after layout settles during the smooth scroll.
-        setTimeout(function () {
-            var nextRect = el.getBoundingClientRect();
-            var nextPageTop = window.pageYOffset || document.documentElement.scrollTop || 0;
-            var nextTargetTop = nextPageTop + nextRect.top - insetTop - ((usableViewportH - nextRect.height) / 2);
-            var nextClampedTop = Math.max(0, Math.min(nextTargetTop, maxTop));
-            window.scrollTo({
-                top: nextClampedTop,
-                behavior: 'smooth'
-            });
-        }, 360);
     }
 
     function _scrollIntoViewSequenced(el, forceScroll) {
         if (!el) return;
-        var MIN_SCROLL_GAP_MS = Math.max(1200, _vcLastHighlightDelayMs - 120);
+        var MIN_SCROLL_GAP_MS = Math.max(1800, _vcLastHighlightDelayMs - 150);
         var now = Date.now();
         var waitMs = Math.max(0, MIN_SCROLL_GAP_MS - (now - _vcLastScrollAt));
         setTimeout(function () {
@@ -1974,12 +2024,12 @@
             el._vcPrimaryTimer = setTimeout(function () {
                 el.classList.remove('vc-highlight-primary');
                 el.classList.add('vc-highlight-secondary');
-            }, 2600);
+            }, 3400);
         }
 
         el._vcFadeTimer = setTimeout(function () {
             el.classList.add('vc-highlight-fade');
-        }, Math.max(0, item.autoFadeMs - 900));
+        }, Math.max(0, item.autoFadeMs - 1400));
 
         el._vcRemoveTimer = setTimeout(function () {
             el.classList.remove('vc-highlight-primary', 'vc-highlight-secondary', 'vc-highlight-fade', 'vc-highlighted');
@@ -1999,6 +2049,30 @@
             return a.delayMs - b.delayMs;
         });
         _vcQueuedHighlights = [];
+
+        batch = batch.map(function (item, index) {
+            var rawEl = _store.findProduct(item.productId);
+            var resolved = _resolveHighlightTarget(rawEl, item.productId);
+            var rect = resolved && typeof resolved.getBoundingClientRect === 'function'
+                ? resolved.getBoundingClientRect()
+                : null;
+            return {
+                item: item,
+                originalIndex: index,
+                visibleRank: rect ? ((Math.round(rect.top) * 10000) + Math.round(rect.left)) : Number.POSITIVE_INFINITY,
+                isVisible: !!rect
+            };
+        }).sort(function (a, b) {
+            if (a.isVisible && b.isVisible && a.visibleRank !== b.visibleRank) {
+                return a.visibleRank - b.visibleRank;
+            }
+            if (a.item.delayMs !== b.item.delayMs) {
+                return a.item.delayMs - b.item.delayMs;
+            }
+            return a.originalIndex - b.originalIndex;
+        }).map(function (entry) {
+            return entry.item;
+        });
 
         for (var i = 0; i < batch.length; i++) {
             batch[i].order = i + 1;
@@ -2319,8 +2393,133 @@
     }
 
     /* ── apply_filter (price, category, etc.) ───────────────────────────────── */
-    function _doApplyFilter(filterType, filterValue) {
-        _store.applyFilter(filterType, filterValue);
+function _doApplyFilter(filterType, filterValue, label) {
+        if (!filterType || !filterValue) return;
+        var handled = false;
+        if (_store && typeof _store.applyFilter === 'function') {
+            handled = _store.applyFilter(filterType, filterValue) === true;
+        }
+        if (!handled) {
+            _applyFilterDomFallback(filterType, filterValue);
+        }
+        _showToast(label || ('Filtered: ' + filterValue), 'info', 2200);
+        setTimeout(_sendContextUpdate, 250);
+        setTimeout(_sendContextUpdate, 900);
+    }
+
+    function _doApplySort(sortBy, label) {
+        if (!sortBy) return;
+        var handled = false;
+        if (_store && typeof _store.applySort === 'function') {
+            handled = _store.applySort(sortBy) === true;
+        }
+        if (!handled) {
+            _applySortDomFallback(sortBy);
+        }
+        _showToast(label || ('Sorted: ' + sortBy), 'info', 2200);
+        setTimeout(_sendContextUpdate, 250);
+        setTimeout(_sendContextUpdate, 900);
+    }
+
+    function _clearFilterDomFallback() {
+        var cards = document.querySelectorAll('[data-product_id], [data-product-id], .product, .product-card, .vc-demo-card');
+        cards.forEach(function (card) {
+            var host = card.closest('li.product, article.product, [data-product_id], [data-product-id], .product, .product-item, .vc-demo-card') || card;
+            if (!host) return;
+            host.style.opacity = '';
+            host.style.transform = '';
+            host.style.pointerEvents = '';
+            host.style.display = '';
+            host.style.filter = '';
+        });
+    }
+
+    function _applyFilterDomFallback(filterType, filterValue) {
+        var normalizedType = String(filterType || '').toLowerCase();
+        var normalizedValue = String(filterValue || '').toLowerCase().trim();
+        if (!normalizedType || !normalizedValue) return;
+
+        _clearFilterDomFallback();
+
+        var cards = document.querySelectorAll('[data-product_id], [data-product-id], .product, .product-card, .vc-demo-card');
+        cards.forEach(function (card) {
+            var host = card.closest('li.product, article.product, [data-product_id], [data-product-id], .product, .product-item, .vc-demo-card') || card;
+            if (!host) return;
+
+            var matches = true;
+            if (normalizedType === 'category') {
+                var categoryValue =
+                    host.getAttribute('data-category') ||
+                    host.dataset.category ||
+                    (host.querySelector('.product-category-tag') ? host.querySelector('.product-category-tag').textContent : '') ||
+                    '';
+                matches = String(categoryValue).toLowerCase().trim() === normalizedValue;
+            } else if (normalizedType === 'price') {
+                var rawPrice = host.getAttribute('data-price') || host.dataset.price || '';
+                var price = Number(rawPrice);
+                if (!Number.isFinite(price)) {
+                    var priceText = host.querySelector('.price-current, .price, .amount');
+                    var numericText = priceText ? String(priceText.textContent || '').replace(/[^0-9.]/g, '') : '';
+                    price = Number(numericText);
+                }
+                var parts = normalizedValue.split('-');
+                var min = Number(parts[0] || 0);
+                var max = Number(parts[1] || Number.POSITIVE_INFINITY);
+                matches = Number.isFinite(price) && price >= min && price <= max;
+            } else if (normalizedType === 'brand') {
+                var brandValue = host.getAttribute('data-brand') || host.dataset.brand || '';
+                matches = String(brandValue).toLowerCase().trim() === normalizedValue;
+            } else if (normalizedType === 'tag') {
+                var tagValue = host.getAttribute('data-tag') || host.dataset.tag || '';
+                matches = String(tagValue).toLowerCase().trim() === normalizedValue;
+            }
+
+            host.style.transition = 'opacity 300ms ease, transform 300ms ease, filter 300ms ease';
+            if (matches) {
+                host.style.opacity = '1';
+                host.style.transform = 'scale(1)';
+                host.style.pointerEvents = '';
+                host.style.filter = '';
+            } else {
+                host.style.opacity = '0.15';
+                host.style.transform = 'scale(0.96)';
+                host.style.pointerEvents = 'none';
+                host.style.filter = 'grayscale(0.2)';
+            }
+        });
+    }
+
+    function _applySortDomFallback(sortBy) {
+        var container = document.querySelector('.product-grid, .products, [data-product-list], #product-grid');
+        if (!container) return;
+
+        var cards = Array.prototype.slice.call(
+            container.querySelectorAll('[data-product_id], [data-product-id], .product, .product-card, .vc-demo-card')
+        );
+        if (!cards.length) return;
+
+        var comparator = null;
+        if (sortBy === 'price_asc' || sortBy === 'price_desc') {
+            comparator = function (a, b) {
+                var aText = (a.getAttribute('data-price') || a.dataset.price || (a.querySelector('.price-current, .price, .amount') || {}).textContent || '').replace(/[^0-9.]/g, '');
+                var bText = (b.getAttribute('data-price') || b.dataset.price || (b.querySelector('.price-current, .price, .amount') || {}).textContent || '').replace(/[^0-9.]/g, '');
+                var aPrice = Number(aText) || 0;
+                var bPrice = Number(bText) || 0;
+                return sortBy === 'price_desc' ? (bPrice - aPrice) : (aPrice - bPrice);
+            };
+        } else if (sortBy === 'name') {
+            comparator = function (a, b) {
+                var aName = ((a.querySelector('.woocommerce-loop-product__title, .name, h2, h3') || {}).textContent || '').trim();
+                var bName = ((b.querySelector('.woocommerce-loop-product__title, .name, h2, h3') || {}).textContent || '').trim();
+                return aName.localeCompare(bName);
+            };
+        } else {
+            return;
+        }
+
+        cards.sort(comparator).forEach(function (card) {
+            container.appendChild(card);
+        });
     }
 
     /* ══════════════════════════════════════════════════════════════════════════
@@ -2393,7 +2592,50 @@
                 }
             },
 
-            applyFilter: function () { },
+            applyFilter: function (filterType, filterValue) {
+                if (filterType === 'category') {
+                    var category = String(filterValue || '').trim();
+                    if (typeof window.vcApplyCategoryFilter === 'function') {
+                        window.vcApplyCategoryFilter(category);
+                        return true;
+                    }
+                    var catPill = document.querySelector('.cat-pill[onclick*="' + category.replace(/"/g, '\\"') + '"]');
+                    if (catPill) {
+                        catPill.click();
+                        return true;
+                    }
+                    return false;
+                }
+                if (filterType === 'price') {
+                    if (typeof window.vcApplyPriceFilter === 'function') {
+                        window.vcApplyPriceFilter(filterValue);
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            applySort: function (sortBy) {
+                if (typeof window.vcApplySort === 'function') {
+                    return window.vcApplySort(sortBy) === true;
+                }
+                var select = document.getElementById('sort-select');
+                if (!select) return false;
+                var sortMap = {
+                    price_asc: 'price-asc',
+                    price_desc: 'price-desc',
+                    name: 'name-asc',
+                    popularity: 'default',
+                    newest: 'default'
+                };
+                var mapped = sortMap[sortBy] || 'default';
+                select.value = mapped;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                if (typeof window.sortProducts === 'function') {
+                    window.sortProducts();
+                }
+                return true;
+            },
         },
 
         /* ── WooCommerce adapter ────────────────────────────────────────────── */
@@ -2517,6 +2759,7 @@
                     if (slider) {
                         slider.value = filterValue;
                         slider.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
                     }
                 }
                 /* Category filter — look for layered nav links */
@@ -2524,8 +2767,29 @@
                     var link = document.querySelector(
                         '.widget_product_categories a[href*="' + filterValue + '"]'
                     );
-                    if (link) link.click();
+                    if (link) {
+                        link.click();
+                        return true;
+                    }
                 }
+                return false;
+            },
+
+            applySort: function (sortBy) {
+                var select = document.querySelector('select.orderby, .woocommerce-ordering select');
+                if (!select) return false;
+                var valueMap = {
+                    price_asc: 'price',
+                    price_desc: 'price-desc',
+                    name: 'title',
+                    popularity: 'popularity',
+                    newest: 'date'
+                };
+                var mapped = valueMap[sortBy] || '';
+                if (!mapped) return false;
+                select.value = mapped;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
             },
         },
 
@@ -2594,7 +2858,9 @@
                 }
             },
 
-            applyFilter: function () { /* Shopify filter integration TBD */ },
+            applyFilter: function () { return false; /* Shopify filter integration TBD */ },
+
+            applySort: function () { return false; /* Shopify sort integration TBD */ },
         },
 
         /* ── Generic fallback adapter ───────────────────────────────────────── */
@@ -2649,7 +2915,9 @@
                 }
             },
 
-            applyFilter: function () { },
+            applyFilter: function () { return false; },
+
+            applySort: function () { return false; },
         },
     };
 
