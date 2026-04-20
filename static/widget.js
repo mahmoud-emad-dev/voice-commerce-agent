@@ -1845,7 +1845,7 @@ case 'apply_filter':
     var _vcQueuedHighlights = [];
     var _vcHighlightBatchTimer = null;
     var _vcLastScrollAt = 0;
-    var _vcLastHighlightDelayMs = 1400;
+    var _vcLastHighlightDelayMs = 1500;
     var _vcModalAutoCloseTimer = null;
 
     function _clearProductFocusState() {}
@@ -2038,41 +2038,18 @@ case 'apply_filter':
         }, item.autoFadeMs);
     }
 
-    function _flushQueuedHighlights() {
+function _flushQueuedHighlights() {
         if (_vcHighlightBatchTimer) {
             clearTimeout(_vcHighlightBatchTimer);
             _vcHighlightBatchTimer = null;
         }
         if (!_vcQueuedHighlights.length) return;
 
+        // Sort by delayMs to follow server's order (top-to-bottom as returned from search)
         var batch = _vcQueuedHighlights.slice().sort(function (a, b) {
             return a.delayMs - b.delayMs;
         });
         _vcQueuedHighlights = [];
-
-        batch = batch.map(function (item, index) {
-            var rawEl = _store.findProduct(item.productId);
-            var resolved = _resolveHighlightTarget(rawEl, item.productId);
-            var rect = resolved && typeof resolved.getBoundingClientRect === 'function'
-                ? resolved.getBoundingClientRect()
-                : null;
-            return {
-                item: item,
-                originalIndex: index,
-                visibleRank: rect ? ((Math.round(rect.top) * 10000) + Math.round(rect.left)) : Number.POSITIVE_INFINITY,
-                isVisible: !!rect
-            };
-        }).sort(function (a, b) {
-            if (a.isVisible && b.isVisible && a.visibleRank !== b.visibleRank) {
-                return a.visibleRank - b.visibleRank;
-            }
-            if (a.item.delayMs !== b.item.delayMs) {
-                return a.item.delayMs - b.item.delayMs;
-            }
-            return a.originalIndex - b.originalIndex;
-        }).map(function (entry) {
-            return entry.item;
-        });
 
         for (var i = 0; i < batch.length; i++) {
             batch[i].order = i + 1;
@@ -2380,7 +2357,7 @@ case 'apply_filter':
         }
         _vcQueuedHighlights = [];
         _vcLastScrollAt = 0;
-        _vcLastHighlightDelayMs = 1400;
+        _vcLastHighlightDelayMs = 1500;
 
         var selector = '.vc-highlight-primary, .vc-highlight-secondary, .vc-highlight-fade, .vc-highlighted';
         document.querySelectorAll(selector).forEach(function (el) {
