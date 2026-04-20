@@ -2730,11 +2730,15 @@
 
       document.getElementById('product-modal').classList.add('open');
       document.body.style.overflow = 'hidden';
+      // Hide product badges when modal is open
+      document.querySelectorAll('.product-badges').forEach(el => el.style.display = 'none');
     }
 
     function closeModal() {
       document.getElementById('product-modal').classList.remove('open');
       document.body.style.overflow = '';
+      // Show product badges again
+      document.querySelectorAll('.product-badges').forEach(el => el.style.display = '');
     }
 
     function prevImg() {
