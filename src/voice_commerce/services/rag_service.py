@@ -328,6 +328,48 @@ class RagService:
 
         return preferred, discouraged
 
+    def _strict_category_for_query(self, query: str) -> str | None:
+        """
+        Return one clear category intent when the query explicitly names a product type.
+
+        This is used to stop pagination from drifting into semantically-related but
+        wrong categories, e.g. "shorts" later returning pants or tees.
+        """
+        normalized_query = self._normalize_query_text(query).replace("-", " ")
+        strict_rules = {
+            "short": "Shorts",
+            "shorts": "Shorts",
+            "tee": "Tees",
+            "tees": "Tees",
+            "t shirt": "Tees",
+            "t shirts": "Tees",
+            "tank": "Tanks",
+            "tanks": "Tanks",
+            "bra": "Bras & Tanks",
+            "bras": "Bras & Tanks",
+            "jacket": "Jackets",
+            "jackets": "Jackets",
+            "pant": "Pants",
+            "pants": "Pants",
+            "hoodie": "Hoodies & Sweatshirts",
+            "hoodies": "Hoodies & Sweatshirts",
+            "sweatshirt": "Hoodies & Sweatshirts",
+            "sweatshirts": "Hoodies & Sweatshirts",
+            "watch": "Watches",
+            "watches": "Watches",
+            "bag": "Bags",
+            "bags": "Bags",
+        }
+
+        matches = {
+            category_name
+            for phrase, category_name in strict_rules.items()
+            if phrase in normalized_query
+        }
+        if len(matches) == 1:
+            return next(iter(matches))
+        return None
+
     def _rerank_products_for_query(self, query: str, products: list[Product]) -> list[Product]:
         """
         Apply a light heuristic rerank over vector results to reduce obvious bad fits.
@@ -535,6 +577,23 @@ class RagService:
                 )
             }
             search_results = [product for product in search_results if product.id in allowed_ids]
+
+        strict_category = self._strict_category_for_query(query)
+        if strict_category:
+            constrained_results = [
+                product
+                for product in search_results
+                if strict_category in product.category_names
+            ]
+            if constrained_results:
+                log.info(
+                    "rag_search_strict_category_applied",
+                    query=query[:80],
+                    category=strict_category,
+                    before=len(search_results),
+                    after=len(constrained_results),
+                )
+                search_results = constrained_results
 
         reranked_results = self._rerank_products_for_query(query, search_results)
         return reranked_results[:limit]
