@@ -211,11 +211,11 @@ class ActionDispatcher:
             actions.append(sort_action)
 
         # Give the page a moment to apply filter/sort before highlights begin.
-        # First highlight after ~1.5s - sync with when Gemini starts talking about first product
-        # Stagger by ~2s between products - gives time for "first...", "this one...", etc.
-        base_delay_ms = 1500 if len(actions) > 1 else 800
-        STAGGER_MS = 2000
-        FADE_MS = 10000
+        # First highlight at 2.5s - gives time for Gemini to start speaking about first result
+        # Stagger by 3.5s between products - slow enough to see each one clearly
+        base_delay_ms = 2500
+        STAGGER_MS = 3500
+        FADE_MS = 18000  # Each highlight stays visible for 18s
 
         for i, product in enumerate(products[:4]):
             pid: int | None = product.get("id")
