@@ -130,12 +130,53 @@ class GeminiLiveHandler:
             log.info("gemini_session_marked_closed", reason=reason)
         self._session_closed = True
 
-    def _is_close_error(self, exc: Exception) -> bool:
-        """Return True for websocket/session shutdown errors we should treat as normal closure."""
+    def _classify_session_error(self, exc: Exception) -> str:
+        """Classify live session errors into normal closure, upstream failure, or unknown."""
         if isinstance(exc, ConnectionClosed):
+            code = getattr(exc, "code", None)
+            if code in (1000, 1001):
+                return "normal_close"
+            if code in (1008, 1011):
+                return "upstream_failure"
+            return "closed"
+        error_msg = str(exc).upper()
+        if any(token in error_msg for token in ("1011", "CANCELLED")):
+            return "upstream_failure"
+        if "1008" in error_msg and "OPERATION IS NOT IMPLEMENTED" in error_msg:
+            return "upstream_failure"
+        if any(token in error_msg for token in ("1000", "1001", "closed")):
+            return "normal_close"
+        return "unknown"
+
+    def _handle_send_exception(self, action: str, exc: Exception, *, tool_name: str | None = None) -> bool:
+        """
+        Normalize send-side races after Gemini has already started closing.
+
+        Returns True when the caller should swallow the exception because the
+        session is no longer usable and receive_events() is responsible for the
+        reconnect/close flow.
+        """
+        classification = self._classify_session_error(exc)
+        if classification == "normal_close":
+            self._mark_session_closed(f"{action}:{exc}")
+            log.info(
+                "gemini_send_skipped_closed_session",
+                action=action,
+                tool=tool_name,
+                error=str(exc),
+            )
             return True
-        error_msg = str(exc)
-        return any(token in error_msg for token in ("1011", "1000", "1001", "CANCELLED", "closed"))
+        if classification in {"upstream_failure", "closed"}:
+            self._mark_session_closed(f"{action}:{exc}")
+            log.error(
+                "gemini_send_aborted_closed_session",
+                action=action,
+                tool=tool_name,
+                classification=classification,
+                error=str(exc),
+            )
+            return True
+        return False
          
     # =========================================================================
     # SENDING METHODS (App -> Gemini)
@@ -160,9 +201,7 @@ class GeminiLiveHandler:
                 
             )
         except Exception as exc:
-            if self._is_close_error(exc):
-                self._mark_session_closed(f"send_text:{exc}")
-                log.info("gemini_send_text_skipped_closed_session", error=str(exc))
+            if self._handle_send_exception("send_text", exc):
                 return
             raise
 
@@ -186,9 +225,7 @@ class GeminiLiveHandler:
                 )
             )
         except Exception as exc:
-            if self._is_close_error(exc):
-                self._mark_session_closed(f"send_audio_chunk:{exc}")
-                log.info("gemini_audio_chunk_dropped_closed_session", error=str(exc))
+            if self._handle_send_exception("send_audio_chunk", exc):
                 return
             raise
 
@@ -224,9 +261,7 @@ class GeminiLiveHandler:
                 ],
             )
         except Exception as exc:
-            if self._is_close_error(exc):
-                self._mark_session_closed(f"send_tool_result:{exc}")
-                log.info("gemini_tool_result_dropped_closed_session", tool=tool_name, error=str(exc))
+            if self._handle_send_exception("send_tool_result", exc, tool_name=tool_name):
                 return
             raise
 
@@ -294,9 +329,7 @@ class GeminiLiveHandler:
                 turn_complete=True,
             )
         except Exception as exc:
-            if self._is_close_error(exc):
-                self._mark_session_closed(f"inject_live_context:{exc}")
-                log.info("gemini_context_injection_dropped_closed_session", error=str(exc))
+            if self._handle_send_exception("inject_live_context", exc):
                 return
             raise
     # async def send_audio_stream_end(self) -> None:
@@ -413,6 +446,7 @@ class GeminiLiveHandler:
             error_msg = str(exc)
             # 1. Catch known Gemini Live API bugs (e.g., fast barge-in panic)
             if "1008" in error_msg and  "Operation is not implemented" in error_msg:
+                self._mark_session_closed(error_msg)
                 log.error("gemini_1008_live_api_bug", error=error_msg)
                 yield {
                 "type": "session_closed",
