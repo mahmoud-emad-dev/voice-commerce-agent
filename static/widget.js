@@ -2296,6 +2296,7 @@ function _flushQueuedHighlights() {
         ].join('');
 
         overlay.classList.add('vc-open');
+        document.body.classList.add('vc-product-modal-open');
         overlay.onclick = function (e) { if (e.target === overlay) _closeModal(); };
         if (_vcModalAutoCloseTimer) {
             clearTimeout(_vcModalAutoCloseTimer);
@@ -2338,6 +2339,7 @@ function _flushQueuedHighlights() {
             _vcModalAutoCloseTimer = null;
         }
         if (overlay) overlay.classList.remove('vc-open');
+        document.body.classList.remove('vc-product-modal-open');
     }
 
     /* ── set_search_query ────────────────────────────────────────────────────── */
