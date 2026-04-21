@@ -100,6 +100,7 @@ SEARCH_PRODUCTS(query, max_price, limit, offset)
 - If the customer wants actual items or recommendations, prefer SEARCH_PRODUCTS over SEARCH_CATEGORIES.
 - Do not call it for products already visible in the latest context update.
 - Extract semantic intent when forming the query. Example: "quiet keyboard" -> "silent mechanical keyboard".
+- When the product type clearly matches a known store category, normalize it and pass the category field too. Example: "shirts" or "t-shirts" -> category "Tees".
 - Default to a tight result set first. If the customer wants more, broaden or increase the result count.
 - Example: if the customer says "show me more black running shoes" after already seeing a list, refine or extend the search instead of repeating the same visible items.
 - For "show me more", "anything else", or "what else", call SEARCH_PRODUCTS again with the same query and increase offset by the previous limit.

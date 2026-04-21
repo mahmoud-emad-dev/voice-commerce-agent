@@ -19,6 +19,9 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                 "Use this when the customer wants products, options, recommendations, or more items in a product type. "
                 "This includes requests like 'show me shorts', 'more shorts', 'summer clothing', "
                 "'light jackets', or 'find me something under $50'. "
+                "When the customer clearly names a product type or known category, normalize it to the store's category "
+                "and include the category field. Examples: shirts/t-shirts/tees -> category='Tees', "
+                "jackets -> category='Jackets', hoodies -> category='Hoodies & Sweatshirts'. "
                 "For pagination, if the user says 'show me more', 'what else', or 'anything else', "
                 "call this again with the same query and set offset to previous_offset + previous_limit. "
                 "Use this instead of search_categories when the user wants actual products, not just category names. "
@@ -35,6 +38,13 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                             "The natural language search query. Use the user's words "
                             "directly, in their language (Arabic or English both work). "
                             "Include price if mentioned, e.g. 'running shoes under $100'."
+                        ),
+                    ),
+                    "category": types.Schema(
+                        type=types.Type.STRING,
+                        description=(
+                            "Optional normalized store category name when the user's intent clearly matches one. "
+                            "Examples: 'Tees', 'Jackets', 'Shorts', 'Pants', 'Bags'."
                         ),
                     ),
                     "max_price": types.Schema(
