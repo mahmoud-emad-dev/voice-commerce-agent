@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     # RAG / Vector Search SETTINGS
     # =========================================================================
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_dimension: int = 384
     qdrant_collection: str = "products"
 
 # THE SINGLETON INSTANCE

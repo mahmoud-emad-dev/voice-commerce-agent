@@ -9,13 +9,16 @@
 # ==============================================================================
 
 from __future__ import annotations
+
 import time
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 
 from voice_commerce.config.settings import settings
+from voice_commerce.core.rag import embedder
+from voice_commerce.services.rag_service import get_rag_service
 
 
 router = APIRouter()
@@ -71,7 +74,7 @@ async def health_check() -> HealthResponse:
     summary="Readiness check",  
     description="Returns 200 if the server is ready to handle requests. Checks dependencies like Gemini API key.",
 )
-async def readiness_check() -> ReadyResponse:
+async def readiness_check(response: Response) -> ReadyResponse:
     """
     Readiness check endpoint.
  
@@ -84,13 +87,16 @@ async def readiness_check() -> ReadyResponse:
     Phase 7+: Will also check Qdrant connectivity.
     
     """
-
+    rag = get_rag_service()
     checks: dict[str, str] = {}
-    # Check 1: Is Gemini API key configured?
-    if settings.gemini_api_key:
-        checks["gemini_configured"] = "ok"
-    else:
-        checks["gemini_configured"] = "missing_api_key"
+
+    checks["gemini_configured"] = "ok" if settings.is_gemini_configured else "missing_api_key"
+    checks["embedder"] = "ready" if embedder.is_ready() else "warming_up"
+    checks["rag_catalog"] = "ready" if rag.is_ready else "syncing"
+
+    embedder_error = embedder.last_error()
+    if embedder_error:
+        checks["embedder"] = "load_failed"
 
 
 
@@ -103,20 +109,21 @@ async def readiness_check() -> ReadyResponse:
  
     # # Check 3: What Qdrant mode are we using?
     # checks["qdrant_mode"] = settings.qdrant_mode
-
-
-    # We could add actual HTTP pings to Gemini/Qdrant here in later phases.
-    is_ready = settings.gemini_api_key != ""
-    status = "ready" if is_ready else "not_ready"
+    is_ready = (
+        settings.is_gemini_configured
+        and embedder.is_ready()
+        and rag.is_ready
+        and not embedder_error
+    )
+    readiness_status = "ready" if is_ready else "not_ready"
     log.debug("readiness_check_called", checks=checks, is_ready=is_ready)
     if not is_ready:
         log.warning("readiness_check_failed", checks=checks)
     else:
         log.debug("readiness_check_passed")
 
-
-    return ReadyResponse(
-            status=status,
-            checks=checks,
-        )
+    response.status_code = (
+        status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+    return ReadyResponse(status=readiness_status, checks=checks)
 

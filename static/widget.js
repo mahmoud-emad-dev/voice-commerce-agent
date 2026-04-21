@@ -79,6 +79,25 @@
         var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         return proto + '//' + window.location.host + '/ws/voice';
     }
+
+    function _isDebugEnabled() {
+        var debugAttr = _cfg('debug', '');
+        if (debugAttr) {
+            return ['1', 'true', 'yes', 'on'].indexOf(String(debugAttr).toLowerCase()) !== -1;
+        }
+
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            return true;
+        }
+
+        return /(?:\?|&)vc_debug=(?:1|true|yes|on)(?:&|$)/i.test(window.location.search);
+    }
+
+    function _debugLog() {
+        if (!CONFIG.debug || typeof console === 'undefined' || !console.debug) return;
+        console.debug.apply(console, arguments);
+    }
+
     /** Gets or creates a permanent Session ID for this browser tab */
     function _getOrCreateSessionId() {
         var id = sessionStorage.getItem('vc_session_id');
@@ -102,6 +121,7 @@
         theme: _cfg('theme', 'auto'),             // 'light' | 'dark' | 'auto'
         position: _cfg('position', 'bottom-right'),     // 'bottom-right' | 'bottom-left'
         lang: _cfg('lang', 'en'),               // UI language (en | ar | fr)
+        debug: _isDebugEnabled(),
 
         // Audio
         serverSampleRate: 16000,   // PCM rate sent TO server (Gemini input)
@@ -1750,10 +1770,8 @@
      * ══════════════════════════════════════════════════════════════════════════ */
 
     function _onAction(msg) {
-        /* Log to console in dev mode — useful for debugging */
-        /* console.debug('[VoiceCommerce] action:', msg.action, msg); */
-        console.log('🔴 [DEBUG 1] WebSocket received action payload:', msg);
-        console.log('🔴 [DEBUG 2] Action type is:', msg.action);
+        _debugLog('[VoiceCommerce] action payload:', msg);
+        _debugLog('[VoiceCommerce] action type:', msg.action);
         switch (msg.action) {
             case 'highlight_product':
                 if (msg.show_badge === true || msg.scroll_to !== false) {
@@ -1778,7 +1796,7 @@
                 _doAddToRealCart(msg.product_id, msg.quantity);
                 break;
             case 'show_notification':
-                console.log('🔴 [DEBUG 3] Routing to _showToast with message:', msg.message);
+                _debugLog('[VoiceCommerce] show_notification:', msg.message);
                 _showToast(msg.message, msg.level || 'info', msg.duration_ms);
                 break;
             case 'open_cart':
@@ -1844,7 +1862,7 @@ case 'apply_filter':
                 _doClearHighlights();
                 break;
             default:
-                console.log('🔴 [DEBUG] Unknown action:', msg.action);
+                _debugLog('[VoiceCommerce] Unknown action:', msg.action);
                 /* Ignore unknown actions — forward compatibility */
                 break;
         }
