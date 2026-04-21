@@ -4,14 +4,14 @@
 #   Exposes product search and retrieval functions to the Gemini AI.
 #
 # WHY THIS FILE EXISTS:
-#   The AI cannot browse the internet or click through your store. We must give 
+#   The AI cannot browse the internet or click through your store. We must give
 #   it strictly defined "Tools" (Python functions) it can call to look up data.
 #
 # THIS FILE IN THE ARCHITECTURE:
 #   - search_products: Now uses the Semantic RAG Engine (Understands meaning/concepts).
 #   - get_product_details: Still uses live WooCommerce API for real-time stock/price.
-#   These functions are registered in `tool_registry.py` and executed by 
-#   `tool_dispatcher.py`. They act as the bridge between the AI's intent 
+#   These functions are registered in `tool_registry.py` and executed by
+#   `tool_dispatcher.py`. They act as the bridge between the AI's intent
 #   and our `WooCommerceClient`.
 # =============================================================================
 
@@ -20,11 +20,12 @@ import hashlib
 from typing import Any, TypedDict
 
 import structlog
-# 1. We keep WooCommerce client for getting live details
-# from voice_commerce.services.woocommerce_client import get_client
 from voice_commerce.services.csv_client import get_client
-# 2. We import our new Brain for searching
-from voice_commerce.services.rag_service import CategoryProductSnapshot, CategorySummaryEntry, get_rag_service
+from voice_commerce.services.rag_service import (
+    CategoryProductSnapshot,
+    CategorySummaryEntry,
+    get_rag_service,
+)
 from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
@@ -65,7 +66,10 @@ def _format_category_result(category_name: str, summary: CategorySummaryEntry) -
     sample_names = list(summary.get("example_names", []))[:2]
     sample_text = f" Examples include {', '.join(sample_names)}." if sample_names else ""
     return f"{category_name}: {count} product{'s' if count != 1 else ''}.{sample_text}"
+
+
 # ── Tool implementations ──────────────────────────────────────────────────────
+
 
 async def search_products(
     query: str,
@@ -77,10 +81,10 @@ async def search_products(
 ) -> ToolResponse:
     """
     Search the product catalog for items matching a natural language query.
- 
+
     Called by the dispatcher when Gemini yields a tool_call with name="search_products".
     Returns a ToolResponse with a list of products for the UI, and a summary for Gemini.
- 
+
     Args:
         query:      What the user is looking for — extracted by Gemini from speech.
         max_price:  Price ceiling in USD — extracted by Gemini if user said e.g. "under $150".
@@ -104,7 +108,9 @@ async def search_products(
         # Safety Check: If the server just booted and the background task is still downloading
         if not rag.is_ready:
             log.warning("search_attempted_while_rag_syncing")
-            return ToolResponse.error("I am currently updating my catalog database. Please give me a few seconds and try your search again.")
+            return ToolResponse.error(
+                "I am currently updating my catalog database. Please give me a few seconds and try your search again."
+            )
         # 1. Resolve cursor state for this session/query.
         session_cache = _ensure_session_cache(session_id)
         resolved_category = rag.resolve_category_name(category) if category else None
@@ -194,14 +200,15 @@ async def search_products(
         return ToolResponse.error("My connection to the store's database is currently offline.")
     except Exception as e:
         log.error("search_products_error", error=str(e))
-        return ToolResponse.error("I'm having trouble accessing the semantic catalog right now. Please try again later.")
+        return ToolResponse.error(
+            "I'm having trouble accessing the semantic catalog right now. Please try again later."
+        )
 
-    
 
 async def get_product_details(product_id: int, session_id: str = "default") -> ToolResponse:
     """
     Return full details for a specific product by its ID.
- 
+
     Called when the user asks for more information about something
     they saw in search results: "tell me more about the Nike shoes" →
     Gemini calls this with the product_id from the search results it read.
@@ -211,7 +218,7 @@ async def get_product_details(product_id: int, session_id: str = "default") -> T
     try:
         client = get_client()
         # 1. Fetch live Pydantic Product objects
-        product = await client.get_product(product_id=product_id) # Live internet search!
+        product = await client.get_product(product_id=product_id)  # Live internet search!
         if not product:
             return ToolResponse.error(
                 f"I couldn't find product ID {product_id}. "
@@ -235,7 +242,9 @@ async def get_product_details(product_id: int, session_id: str = "default") -> T
         return ToolResponse.error("My connection to the store's database is currently offline.")
     except Exception as e:
         log.error("get_product_details_error", error=str(e))
-        return ToolResponse.error("I'm having trouble fetching those details right now. Please try again.")
+        return ToolResponse.error(
+            "I'm having trouble fetching those details right now. Please try again."
+        )
 
 
 async def search_categories(
@@ -267,7 +276,9 @@ async def search_categories(
         rag = get_rag_service()
         if not rag.is_ready:
             log.warning("search_categories_attempted_while_rag_syncing")
-            return ToolResponse.error("I am still loading the catalog. Please give me a few seconds and ask again.")
+            return ToolResponse.error(
+                "I am still loading the catalog. Please give me a few seconds and ask again."
+            )
 
         category_summary = rag.category_summary
         if not category_summary:
@@ -278,7 +289,10 @@ async def search_categories(
             effective_limit = safe_limit or 12
             preview_items = sorted_categories[safe_offset : safe_offset + effective_limit]
             lines = ["Categories available:"]
-            lines.extend(_format_category_result(category_name, summary) for category_name, summary in preview_items)
+            lines.extend(
+                _format_category_result(category_name, summary)
+                for category_name, summary in preview_items
+            )
             shown_total = safe_offset + len(preview_items)
             if len(sorted_categories) > shown_total:
                 lines.append(
@@ -351,7 +365,9 @@ async def search_categories(
         preview = "; ".join(f"{item['name']} ${item['price']:.2f}" for item in items[:5])
         range_start = safe_offset + 1
         range_end = safe_offset + len(items)
-        lines = [f"Found {len(total_items)} products in {resolved_category} (showing {range_start}-{range_end})."]
+        lines = [
+            f"Found {len(total_items)} products in {resolved_category} (showing {range_start}-{range_end})."
+        ]
         if max_price is not None:
             lines.append(f"Price ceiling applied: ${max_price:.2f}.")
         if in_stock_only:
@@ -375,6 +391,6 @@ async def search_categories(
         )
     except Exception as e:
         log.error("search_categories_error", error=str(e))
-        return ToolResponse.error("I'm having trouble reading the category list right now. Please try again.")
-
- 
+        return ToolResponse.error(
+            "I'm having trouble reading the category list right now. Please try again."
+        )

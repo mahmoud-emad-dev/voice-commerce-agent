@@ -1,16 +1,4 @@
-# src/voice_commerce/main.py
-# ==============================================================================
-# PURPOSE: The entry point and "App Factory" for the FastAPI server.
-#
-# WHY THIS FILE EXISTS: 
-#   It connects settings, routers, and middleware into a single ASGI application.
-#   We use a factory function (create_app) so we can easily create test instances
-#   of the app during automated testing without starting the real server.
-# ==============================================================================
-# THIS FILE IN THE ARCHITECTURE: The central nervous system.
-# # ==============================================================================
-
-
+"""Application entry point and FastAPI app factory."""
 
 from __future__ import annotations
 
@@ -48,7 +36,7 @@ def configure_logging() -> None:
     """
     Configure structlog for structured JSON logging.
     Called once at application startup.
- 
+
     The configuration chain:
     1. structlog.contextvars.merge_contextvars — adds any context variables
        (like tenant_id) that were bound with structlog.contextvars.bind_contextvars()
@@ -58,7 +46,7 @@ def configure_logging() -> None:
     5. structlog.dev.ConsoleRenderer — pretty output in dev (JSON in production)
     """
     log_level = getattr(logging, settings.log_level, logging.INFO)
- 
+
     structlog.configure(
         processors=[
             # Merge any contextvars (we'll use this in Phase 13 to auto-attach tenant_id)
@@ -69,14 +57,15 @@ def configure_logging() -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             # In debug mode: pretty colored output for readability
             # In production: JSON output for machine parsing
-            structlog.dev.ConsoleRenderer() if settings.app_debug
+            structlog.dev.ConsoleRenderer()
+            if settings.app_debug
             else structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
     )
- 
+
     # Also configure the standard library logging to the same level
     # (some libraries use stdlib logging directly)
     logging.basicConfig(level=log_level, format="%(message)s")
@@ -84,6 +73,7 @@ def configure_logging() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
+    """Manage startup and shutdown resources for the FastAPI application."""
     # --- STARTUP ---
     log.info(
         "voice_commerce_agent_starting",
@@ -105,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     # current demo phases we start from the CSV catalog to keep the static demo
     # pages reproducible and independent from a live storefront.
     from voice_commerce.services import csv_client
+
     store_client = await csv_client.initialize()
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
@@ -126,7 +117,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     log.info("Application  shut down completed")
 
 
-
 def create_app() -> FastAPI:
     """
     Factory function to create and configure the FastAPI instance.
@@ -144,20 +134,22 @@ def create_app() -> FastAPI:
 
     # CORS Middleware: Allows the frontend browser to talk to this backend
     add_cors_middleware(app)
+
     # Root route - provides a friendly entry point
-    @app.get("/" , tags=["system"])
+    @app.get("/", tags=["system"])
     async def root():
         """
         Root endpoint returning basic API metadata.
         """
         return {"message": "Welcome to the Voice Commerce Agent API", "version": "0.1.0"}
-    
-    # ── RAG Monitoring Endpoints (From Claude) ──
+
+    # Lightweight runtime endpoint to confirm the background catalog sync state.
     @app.get("/rag/stats", tags=["system"])
     async def rag_stats():
         """Check if the background RAG sync has finished."""
         rag = get_rag_service()
         return rag.stats()
+
     # Register other routes
     app.include_router(health.router, tags=["system"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
@@ -165,5 +157,5 @@ def create_app() -> FastAPI:
 
     return app
 
-# The actual global variable Uvicorn looks for to start the server
+
 app = create_app()

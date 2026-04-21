@@ -1,18 +1,19 @@
-from __future__ import annotations # Enables postponed evaluation of type hints
-from pydantic_settings import BaseSettings , SettingsConfigDict
+from __future__ import annotations
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Central application settings loaded from environment variables."""
 
     # -------------------------------------------------------------------------
     # pydantic-settings model configuration
     # -------------------------------------------------------------------------
     model_config = SettingsConfigDict(
-        env_file = ".env",
-        env_file_encoding = "utf-8",
-        extra = "ignore",
-        case_sensitive = False,
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
     )
 
     # =========================================================================
@@ -21,11 +22,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
     gemini_voice_name: str = "Charon"
-    
+
     @property
     def is_gemini_configured(self) -> bool:
+        """True when the Gemini API key is available."""
         return bool(self.gemini_api_key)
-    
+
     # =========================================================================
     # APPLICATION SETTINGS
     # =========================================================================
@@ -35,7 +37,8 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug_payload_logs: bool = False
     enable_public_demo: bool | None = None
-    # Which domains can make requests to this API. In production, set this to frontend's real domain name.
+    # Which domains can make requests to this API. In production, replace the
+    # demo wildcard with the real frontend origin.
     cors_allow_origins: list[str] = ["*"]
 
     @property
@@ -52,18 +55,17 @@ class Settings(BaseSettings):
     # STORE SETTINGS
     # ========================================================================
     store_name: str = "NEXFIT"
-    assistant_name:  str = "PHOENIX"
-    store_tagline:   str = "Your go-to store for performance sports gear."
+    assistant_name: str = "PHOENIX"
+    store_tagline: str = "Your go-to store for performance sports gear."
 
     # =========================================================================
     # WooCommerce SETTINGS
     # =========================================================================
-    wc_store_url:       str = ""
-    wc_consumer_key:    str = ""
-    wc_consumer_secret: str = ""    
-    wc_timeout:         int = 30
-    
-    # ── Computed properties ───────────────────────────────────────────────────
+    wc_store_url: str = ""
+    wc_consumer_key: str = ""
+    wc_consumer_secret: str = ""
+    wc_timeout: int = 30
+
     @property
     def is_woocommerce_configured(self) -> bool:
         """
@@ -75,6 +77,7 @@ class Settings(BaseSettings):
 
     @property
     def woocommerce_api_url(self) -> str:
+        """Base WooCommerce REST API URL derived from the configured store URL."""
         return f"{self.wc_store_url.rstrip('/')}/wp-json/wc/v3"
 
     # =========================================================================
@@ -84,7 +87,5 @@ class Settings(BaseSettings):
     embedding_dimension: int = 384
     qdrant_collection: str = "products"
 
-# THE SINGLETON INSTANCE
+
 settings = Settings()
-
-

@@ -222,6 +222,7 @@ def highlight(
     auto_fade_ms: int = 8000,
     show_badge: bool = False,
 ) -> HighlightProduct:
+    """Create a highlight action with the common assistant defaults."""
     return HighlightProduct(
         product_id=product_id,
         scroll_to=scroll,
@@ -271,5 +272,3 @@ def apply_sort(
     label: str,
 ) -> ApplySort:
     return ApplySort(sort_by=sort_by, label=label)
-
-
