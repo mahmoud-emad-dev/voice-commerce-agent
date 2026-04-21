@@ -1,111 +1,192 @@
 # Voice Commerce Agent
 
-A production-grade, voice-to-voice AI shopping assistant for WooCommerce stores.
-Powered by Gemini Live API for native audio processing, with RAG-based product search
-and real-time browser control via an embeddable widget.
+Voice Commerce Agent is a real-time shopping assistant for storefronts. It combines Gemini Live voice interaction, tool calling, semantic product search, and browser actions so a shopper can speak naturally and see the page respond in real time.
 
-## What it does
+The project is structured as a full voice-commerce system: a widget captures user input, a FastAPI backend manages the live session, Gemini calls tools when needed, retrieval augments product search, and browser actions update the storefront UI.
 
-A store visitor says "I need running shoes under $150" and the assistant:
-1. Understands the spoken request (Gemini Live, ~400ms latency)
-2. Searches the real product catalog semantically (vector RAG, Arabic + English)
-3. Responds with natural speech AND highlights matching products on the page
-4. Can add items to cart, show the cart, and answer product questions — all by voice
+## Preview
+
+Place project media here before publishing:
+
+- `docs/demo/hero.gif`
+- `docs/demo/search-results.png`
+- `docs/demo/cart-flow.png`
+- `docs/demo/checkout-flow.png`
+
+Suggested embeds:
+
+```md
+![Voice commerce flow](docs/demo/hero.gif)
+![Search results](docs/demo/search-results.png)
+![Cart flow](docs/demo/cart-flow.png)
+```
+
+## Features
+
+- Real-time voice and text interaction through Gemini Live
+- WebSocket session handling for low-latency storefront conversations
+- Tool calling for product search, cart actions, and checkout flow
+- Semantic product retrieval with sentence-transformers and Qdrant
+- Browser actions for highlights, cart updates, and checkout rendering
+- Embeddable widget for storefront integration
+- Local storefront page for testing and recording flows
+
+## Current Implementation
+
+The current codebase includes:
+
+- FastAPI backend with route, middleware, and lifespan setup
+- Gemini Live integration for streaming conversation
+- Retrieval pipeline with embedder, retriever, vector store, and catalog sync
+- CSV-backed catalog path for stable local runs
+- WooCommerce client path kept in the codebase for real store integration
+- In-memory cart and checkout state for the current interaction flow
+
+Planned next-stage improvements include persistent sessions, stronger deployment hardening, and production-grade multi-tenant support.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    User["User in Storefront"] --> Widget["Widget UI<br/>static/widget.js"]
+    Widget -->|Text / Mic Audio| WS["FastAPI WebSocket<br/>voice_websocket_handler.py"]
+    WS --> Gemini["Gemini Live Handler"]
+    Gemini -->|Tool Calls| Dispatcher["Tool Dispatcher"]
+    Dispatcher --> Tools["Product / Cart / Checkout Tools"]
+    Tools --> Rag["RAG Service"]
+    Rag --> Vector["Qdrant Vector Store"]
+    Tools --> Csv["CSV Product Client"]
+    Tools -. optional live store path .-> Woo["WooCommerce Client"]
+    Gemini -->|Browser Actions| Actions["Action Dispatcher"]
+    Actions --> Widget
+    Gemini -->|Audio + Transcript Events| WS
+    WS --> Widget
+```
+
+### Request Flow
+
+1. The widget captures typed input or microphone audio.
+2. The FastAPI WebSocket handler opens and manages the live Gemini session.
+3. Gemini responds directly or issues tool calls through the dispatcher.
+4. Tools query product, cart, checkout, and retrieval services.
+5. Tool results return to Gemini as structured context.
+6. Gemini sends audio, transcript updates, and browser actions back to the widget.
+
+## Repository Structure
+
+```text
+src/voice_commerce/
+├── api/
+│   ├── middleware/        # middleware such as CORS
+│   └── routes/            # thin FastAPI route wiring
+├── config/                # environment-backed settings
+├── core/
+│   ├── actions/           # browser action models and dispatch
+│   ├── rag/               # embedder, retriever, vector store
+│   ├── state/             # in-memory checkout state
+│   ├── tools/             # tool implementations used by Gemini
+│   └── voice/             # Gemini live adapter and audio helpers
+├── handlers/              # WebSocket session orchestration
+├── models/                # Pydantic models
+└── services/              # catalog clients and RAG service
+
+static/
+├── widget.js              # storefront widget
+├── embed_demo.html        # local storefront page
+└── test_client.html       # test harness
+
+tests/                     # pytest suite
+local/                     # planning docs and implementation notes
+docs/demo/                 # screenshots and GIFs for GitHub
+```
 
 ## Tech Stack
 
-| Layer | Technology | Why |
-|---|---|---|
-| Language | Python 3.12 | Current LTS, all AI libraries certified |
-| Package manager | uv | 10-100x faster than pip, lock file reproducibility |
-| Web framework | FastAPI | Async-native, WebSocket built-in, Pydantic integration |
-| AI / Voice | Gemini Live API (gemini-2.5-flash-native-audio-preview) | Native audio in/out, 320-800ms latency, no STT+TTS pipeline needed |
-| Embeddings | sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2) | Arabic + English confirmed, runs locally |
-| Vector DB | Qdrant | In-memory for dev, Docker for production, same client |
-| E-commerce | WooCommerce REST API | Standard WooCommerce store integration |
-| Config | pydantic-settings | Type-safe config from .env, fails fast on missing vars |
-| Logging | structlog | JSON structured logs, queryable in production |
+| Layer | Choice |
+|---|---|
+| Backend | FastAPI |
+| Language | Python 3.12 |
+| Real-time AI | Gemini Live API |
+| Product search | sentence-transformers + Qdrant |
+| Data models | Pydantic |
+| Config | pydantic-settings |
+| Logging | structlog |
+| Package manager | uv |
 
-## Setup
+## Running Locally
 
 ### Requirements
+
 - Python 3.12+
-- uv (`pip install uv`)
-- A Gemini API key (get one at aistudio.google.com)
+- `uv`
+- Gemini API key
 
-### Install
+### Setup
 
 ```bash
-git clone https://github.com/yourname/voice-commerce-agent
+git clone <your-repo-url>
 cd voice-commerce-agent
-
-# Create virtualenv and install dependencies
 uv sync
-
-# Install the project in editable mode (makes imports work)
-uv pip install -e .
-
-# Copy and fill in environment variables
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY at minimum
 ```
 
-### Run
+At minimum, set:
+
+```env
+GEMINI_API_KEY=your_key_here
+```
+
+WooCommerce variables are also included in `.env.example` for the live-store integration path.
+
+### Start The App
 
 ```bash
-# Development server (auto-reload)
 uv run uvicorn src.voice_commerce.main:app --reload --port 8000
-
-# Check it works
-curl http://localhost:8000/health
-# → {"status": "ok", "service": "voice-commerce-agent", ...}
 ```
 
-### Test
+Useful local URLs:
+
+- API root: `http://localhost:8000/`
+- Health: `http://localhost:8000/health`
+- Storefront page: `http://localhost:8000/static/embed_demo.html`
+- Widget asset: `http://localhost:8000/static/widget.js`
+
+## Testing
+
+Run the full suite:
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-## Build Phases
+Run a focused file:
 
-This project is built incrementally — each phase adds one capability:
-
-| Phase | What it adds | Status |
-|---|---|---|
-| P0 | Environment setup (Python 3.12, uv, pyproject.toml) | ✅ |
-| P1 | Project skeleton (FastAPI, settings, health endpoint, tests) | ✅ |
-| P2 | Text ↔ text pipeline (WebSocket + Gemini) | 🔲 |
-| P3 | Function calling (tool registry + dispatcher) | 🔲 |
-| P4 | Audio output (Gemini → browser audio streaming) | 🔲 |
-| P5 | Audio input (mic → PCM → Gemini) | 🔲 |
-| P6 | WooCommerce tools (real product data) | 🔲 |
-| P7 | RAG integration (semantic search) | 🔲 |
-| P8 | Browser actions (AI controls the store page) | 🔲 |
-| P9 | Embeddable widget (one script tag) | 🔲 |
-| P10 | Demo checkpoint — **CV milestone** | 🔲 |
-| P11 | Docker + persistence | 🔲 |
-| P12 | Multi-tenancy | 🔲 |
-| P13 | Observability | 🔲 |
-| P14 | Deployment (VPS + nginx + CI/CD) | 🔲 |
-
-## Project Structure
-
+```bash
+uv run pytest tests/test_health.py -v
 ```
-voice-commerce-agent/
-├── pyproject.toml          # Project definition, dependencies, tool config
-├── .env.example            # Environment variable template
-├── src/
-│   └── voice_commerce/     # The importable package
-│       ├── main.py         # FastAPI app factory + lifespan
-│       ├── config/
-│       │   └── settings.py # All config (pydantic-settings, reads .env)
-│       ├── api/routes/     # HTTP + WebSocket endpoint handlers
-│       ├── core/           # Business logic (voice, RAG, tools, actions)
-│       ├── handlers/       # WebSocket lifecycle managers
-│       ├── services/       # External service clients (WooCommerce, RAG)
-│       └── models/         # Pydantic data models (Product, Cart, Session)
-├── static/                 # Test client HTML + embeddable widget.js
-├── tests/                  # pytest test suite
-└── docker/                 # Dockerfile + docker-compose.yml
-```
+
+## Environment Notes
+
+- `.env` is local-only and ignored by Git.
+- `.env.example` is the shareable template for GitHub.
+- `CORS_ALLOW_ORIGINS=["*"]` is acceptable for local development and should be restricted for deployment.
+
+## Roadmap
+
+- Persist session and checkout state beyond process memory
+- Harden deployment configuration and access control
+- Expand the live-store integration path
+- Improve observability and operational safeguards
+- Add multi-tenant support for hosted storefront use
+
+## Good Portfolio Talking Points
+
+- End-to-end voice commerce loop: user input, tool call, browser action, UI update
+- Real-time WebSocket orchestration around Gemini Live
+- Retrieval-backed product search instead of exact keyword matching
+- Separation between tool logic and browser-side effects
+- Clear path from local catalog mode to live store integration
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

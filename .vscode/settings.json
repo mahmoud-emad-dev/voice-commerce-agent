@@ -1,5 +1,7 @@
 {
     "chatgpt.openOnStartup": true,
     "chatgpt.runCodexInWindowsSubsystemForLinux": true,
-    "editor.fontSize": 13
+    "editor.fontSize": 13,
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.analysis.extraPaths": ["${workspaceFolder}/src"]
 }
