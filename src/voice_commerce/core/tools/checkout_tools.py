@@ -23,20 +23,20 @@ log = structlog.get_logger(__name__)
 
 DEFAULT_PROFILE = {
     "id": "default_demo",
-    "first_name": "Ava",
-    "last_name": "Morgan",
-    "email": "ava.morgan.demo@nexfit.example",
-    "phone": "+1 (555) 424-2042",
-    "address_1": "245 Mercer Street",
-    "city": "New York",
-    "state": "NY",
-    "zip": "10012",
-    "country": "United States",
+    "first_name": "Omar",
+    "last_name": "Al-Qahtani",
+    "email": "omar.alqahtani.demo@nexfit.example",
+    "phone": "+966 50 638 2147",
+    "address_1": "318 King Abdullah Road",
+    "city": "Riyadh",
+    "state": "Riyadh Province",
+    "zip": "12435",
+    "country": "Saudi Arabia",
     "payment_labels": {
-        "card": "Demo Card •••• 4242",
-        "paypal": "PayPal ava.morgan.demo@nexfit.example",
+        "card": "Visa Demo •••• 2147",
+        "paypal": "PayPal omar.alqahtani.demo@nexfit.example",
     },
-    "masked_card": "•••• •••• •••• 4242",
+    "masked_card": "•••• •••• •••• 2147",
 }
 
 AVAILABLE_SHIPPING_OPTIONS = [
