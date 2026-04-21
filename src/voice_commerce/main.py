@@ -13,25 +13,20 @@
 
 
 from __future__ import annotations
-from contextlib import asynccontextmanager
-from collections.abc import AsyncGenerator
-from typing import Any
-import logging
-import os
-import asyncio
 
-import httpx
+import asyncio
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any
+
 import structlog
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
-
-from voice_commerce.config.settings import settings
-from voice_commerce.api.routes import health , voice ,widget
 from voice_commerce.api.middleware.cors import add_cors_middleware
+from voice_commerce.api.routes import health, voice, widget
+from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
-from voice_commerce.services import woocommerce_client
 from voice_commerce.services.rag_service import get_rag_service
 
 log = structlog.get_logger(__name__)
@@ -98,59 +93,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
         woocommerce_configured=settings.is_woocommerce_configured,
     )
 
-    # ## 1.Create WooCommerce Client
-    # #-------------------------------------------------------------------------------------------------------------------
-    # if settings.is_woocommerce_configured:
-    #     wc_client = await woocommerce_client.initialize()
-    #     # Store on app.state so tools can access it
-    #     app.state.wc_client = wc_client
-    #     log.info("app_startup_woocommerce_connected")
-        
-
-    #     # ── PHASE 7: START RAG BRAIN SYNC ──
-    #     # the AI will download products and do math in the background.
-    #     rag = get_rag_service()
-    #     asyncio.create_task(rag.sync_catalog())
-    #     log.info("app_startup_rag_service_initialized")
-    # else:
-    #     log.warning("app_startup_woocommerce_skipped", 
-    #         message="WooCommerce keys missing from .env. Running in disconnected mode.")
-
-    #-------------------------------------------------------------------------------------------------------------------
-
-    ## 1. Create CSV Client
-    #-------------------------------------------------------------------------------------------------------------------
-    # This instantly loads your products.csv into memory
+    # Current phases boot from the demo CSV catalog so the static demo pages
+    # work reliably without a live store dependency.
+    #
+    # Real-store path kept intentionally for reference:
+    #   1. initialize the WooCommerce client
+    #   2. store it on app.state
+    #   3. sync the RAG catalog from the live store
+    #
+    # That WooCommerce integration already exists in the codebase, but for the
+    # current demo phases we start from the CSV catalog to keep the static demo
+    # pages reproducible and independent from a live storefront.
     from voice_commerce.services import csv_client
-    store_client = await csv_client.initialize()  # uses default: tests/products.csv relative to project root
+    store_client = await csv_client.initialize()
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
 
-    # ── PHASE 7: START RAG BRAIN SYNC ──
-    # The AI will instantly embed the CSV products in the background.
+    # Warm the demo catalog in the background so semantic search is ready soon
+    # after startup without blocking the server boot sequence.
     get_rag_service()
     asyncio.create_task(_warm_rag_pipeline())
     log.info("app_startup_rag_service_initialized")
-    #-------------------------------------------------------------------------------------------------------------------
+
     yield
 
     # --- SHUTDOWN ---
     log.info("Application  shutting down...")
 
-    # ## 1. Shutdown: close the httpx client 
-    # #-------------------------------------------------------------------------------------------------------------------
-    # if settings.is_woocommerce_configured:
-    #     await woocommerce_client.shutdown()
-    #     log.info("app_shutdown_woocommerce_disconnected")
-
-    # #-------------------------------------------------------------------------------------------------------------------
-
-    ## 1. Shutdown: Clear the CSV client memory
-    #-------------------------------------------------------------------------------------------------------------------
     await csv_client.shutdown()
     log.info("app_shutdown_csv_store_disconnected")
-    #-------------------------------------------------------------------------------------------------------------------
-
 
     log.info("Application  shut down completed")
 
@@ -187,16 +158,10 @@ def create_app() -> FastAPI:
         """Check if the background RAG sync has finished."""
         rag = get_rag_service()
         return rag.stats()
-    # Register other routes 
-    app.include_router(health.router ,tags=["system"])
+    # Register other routes
+    app.include_router(health.router, tags=["system"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
     app.include_router(widget.router, prefix="/static", tags=["widget"])
-
-    # # Mount the frontend UI folder so localhost:8000/static/test_client.html works
-    # static_dir = "static"
-    # if os.path.exists(static_dir):
-    #     app.mount("/static", StaticFiles(directory=static_dir), name="static")
- 
 
     return app
 

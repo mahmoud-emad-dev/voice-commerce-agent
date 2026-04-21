@@ -170,30 +170,6 @@
 
     var CSS = [
         /* ── Theme variables ──────────────────────────────────────────────────── */
-        // '.vc-root {',
-        // '  --vc-accent:       #2563eb;',
-        // '  --vc-accent-dark:  #1d4ed8;',
-        // '  --vc-accent-light: #eff6ff;',
-        // '  --vc-success:      #16a34a;',
-        // '  --vc-error:        #dc2626;',
-        // '  --vc-warning:      #d97706;',
-        // '  --vc-info:         #2563eb;',
-        // '  --vc-surface:      #ffffff;',
-        // '  --vc-surface2:     #f8fafc;',
-        // '  --vc-surface3:     #f1f5f9;',
-        // '  --vc-border:       #e2e8f0;',
-        // '  --vc-border2:      #cbd5e1;',
-        // '  --vc-text:         #0f172a;',
-        // '  --vc-text2:        #475569;',
-        // '  --vc-text3:        #94a3b8;',
-        // '  --vc-shadow:       0 4px 24px rgba(0,0,0,0.10);',
-        // '  --vc-shadow-lg:    0 8px 40px rgba(0,0,0,0.16);',
-        // '  --vc-radius:       14px;',
-        // '  --vc-radius-sm:    8px;',
-        // '  --vc-radius-pill:  999px;',
-        // '  --vc-font:         -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
-        // '  --vc-z:            2147483600;',   /* just below max z-index */
-        // '}',
         '.vc-root {',
         '  --vc-accent:       #6365f1c1;', /* Modern Indigo */
         '  --vc-accent-dark:  #4f46e5;',
@@ -320,8 +296,6 @@
         '  position:fixed;',
         '  width:330px;',
         '  max-width:calc(100vw - 32px);',
-        // '  height: 480px;', 
-        // '  max-height:calc(100vh - 150px);', /* <--- THE FIX: Stops it from hitting the top of the screen */
         '  max-height: 480px;',
         '  background:var(--vc-surface);',
         '  border:1px solid var(--vc-border);',
@@ -550,45 +524,6 @@
         '.vc-toast.vc-info   {background:#eff6ff;color:#1d4ed8;border-color:#2563eb;}',
         '.vc-toast.vc-warning{background:#fffbeb;color:#92400e;border-color:#d97706;}',
         '.vc-toast-icon{font-size:15px;flex-shrink:0;}',
-
-        // /* --- Floating Notifications (Toasts) --- */
-        // '#vc-toasts {',
-        // '  position: fixed !important;',
-        // '  top: 20px !important;',
-        // '  right: 20px !important;',
-        // '  left: auto !important;',
-        // '  z-index: 2147483647 !important;', /* Maximum possible z-index */
-        // '  display: flex !important;',
-        // '  flex-direction: column !important;',
-        // '  gap: 10px !important;',
-        // '  pointer-events: none !important;',
-        // '  width: max-content !important;',
-        // '  max-width: 80vw !important;',
-        // '}',
-        // '.vc-toast {',
-        // '  background: var(--vc-surface) !important;',
-        // '  color: var(--vc-text) !important;',
-        // '  padding: 14px 20px !important;',
-        // '  border-radius: var(--vc-radius-sm) !important;',
-        // '  box-shadow: var(--vc-shadow-lg) !important;',
-        // '  display: flex !important;',
-        // '  align-items: center !important;',
-        // '  gap: 12px !important;',
-        // '  font-family: var(--vc-font) !important;',
-        // '  font-size: 14px !important;',
-        // '  font-weight: 500 !important;',
-        // '  opacity: 0;',
-        // '  transform: translateX(30px);',
-        // '  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) !important;',
-        // '  border-left: 4px solid var(--vc-info) !important;',
-        // '  pointer-events: auto !important;',
-        // '  margin: 0 !important;',
-        // '  line-height: 1.4 !important;',
-        // '}',
-        // '.vc-toast.vc-success { border-left-color: var(--vc-success) !important; }',
-        // '.vc-toast.vc-error { border-left-color: var(--vc-error) !important; }',
-        // '.vc-toast.vc-warning { border-left-color: var(--vc-warning) !important; }',
-        // '.vc-toast.vc-in { opacity: 1 !important; transform: translateX(0) !important; }',
         /* ── Product highlight ring (applied to host page elements) ──────────── */
 
         '.vc-highlight-primary {',
@@ -646,13 +581,6 @@
         '  0% { transform: scale(0); opacity: 0; }',
         '  100% { transform: scale(1); opacity: 1; }',
         '}',
-        // '  100% { transform: scale(1); opacity: 1; }',
-        // '}',
-        // '@keyframes vc-pulse-ring {',
-        // '  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7) !important; }',
-        // '  70% { box-shadow: 0 0 0 20px rgba(59, 130, 246, 0) !important; }',
-        // '  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0) !important; }',
-        // '}',
         /* ── Modal overlay ────────────────────────────────────────────────────── */
         '#vc-modal-overlay{',
         '  position:fixed;inset:0;',
@@ -892,14 +820,7 @@
         /* Restore chat memory if it exists */
         var savedHistory = sessionStorage.getItem('vc_chat_history');
         if (savedHistory) {
-            var t = document.getElementById('vc-transcript');
-            if (t) {
-                t.innerHTML = savedHistory;
-                // Ensure typing dots aren't stuck on
-                var typing = document.getElementById('vc-typing');
-                if (typing) typing.classList.remove('vc-visible');
-                setTimeout(function () { t.scrollTop = t.scrollHeight; }, 100);
-            }
+            _restoreChatHistory(savedHistory);
         }
     }
 
@@ -1605,7 +1526,7 @@
 
         /* Save to memory after updating */
         setTimeout(function () {
-            sessionStorage.setItem('vc_chat_history', document.getElementById('vc-transcript').innerHTML);
+            _saveChatHistory();
         }, 50);
 
         STATE.turnIndex++;
@@ -1617,7 +1538,62 @@
      * @param {string} text   Message text
      * @returns {HTMLElement} The bubble element
      */
-    function _addBubble(role, text) {
+    function _saveChatHistory() {
+        var transcript = document.getElementById('vc-transcript');
+        if (!transcript) return;
+
+        var messages = [];
+        transcript.querySelectorAll('.vc-msg').forEach(function (node) {
+            var content = node.querySelector('.vc-msg-content');
+            if (!content) return;
+
+            var role = 'vc-system';
+            if (node.classList.contains('vc-user')) role = 'vc-user';
+            else if (node.classList.contains('vc-assistant')) role = 'vc-assistant';
+
+            var timeNode = node.querySelector('.vc-msg-time');
+            messages.push({
+                role: role,
+                text: content.textContent || '',
+                time: timeNode ? timeNode.textContent || '' : '',
+            });
+        });
+
+        sessionStorage.setItem('vc_chat_history', JSON.stringify(messages));
+    }
+
+    function _restoreChatHistory(savedHistory) {
+        var transcript = document.getElementById('vc-transcript');
+        if (!transcript) return;
+
+        var parsedHistory;
+        try {
+            parsedHistory = JSON.parse(savedHistory);
+        } catch (e) {
+            sessionStorage.removeItem('vc_chat_history');
+            return;
+        }
+
+        if (!Array.isArray(parsedHistory)) {
+            sessionStorage.removeItem('vc_chat_history');
+            return;
+        }
+
+        parsedHistory.forEach(function (item) {
+            if (!item || typeof item !== 'object') return;
+            if (typeof item.text !== 'string' || item.text.length === 0) return;
+            if (item.role !== 'vc-user' && item.role !== 'vc-assistant' && item.role !== 'vc-system') return;
+            _addBubble(item.role, item.text, typeof item.time === 'string' ? item.time : '');
+        });
+
+        var typing = document.getElementById('vc-typing');
+        if (typing) typing.classList.remove('vc-visible');
+        STATE.currentBubble = null;
+        STATE.currentRole = null;
+        setTimeout(function () { transcript.scrollTop = transcript.scrollHeight; }, 100);
+    }
+
+    function _addBubble(role, text, timeText) {
         var t = document.getElementById('vc-transcript');
         var el = document.createElement('div');
         el.className = 'vc-msg ' + role;
@@ -1632,7 +1608,7 @@
         if (role !== 'vc-system') {
             var ts = document.createElement('span');
             ts.className = 'vc-msg-time';
-            ts.textContent = _formatTime(new Date());
+            ts.textContent = timeText || _formatTime(new Date());
             el.appendChild(ts);
         }
 
@@ -2137,92 +2113,6 @@ function _flushQueuedHighlights() {
             _flushQueuedHighlights();
         }, 24);
     }
-    /* --- Highlight Queue State --- */
-    // var _highlightQueue = [];
-    // var _isHighlighting = false;
-    // var _highlightSequenceNumber = 0;
-    // var _autoClearTimer = null; /* NEW: Timer to clean up the screen */
-
-    // function _doHighlightProduct(productId) {
-    //     // If a new search happens, stop the cleanup timer so we can start a new tour
-    //     if (_autoClearTimer) clearTimeout(_autoClearTimer);
-
-    //     _highlightQueue.push(productId);
-
-    //     // Start the tour if it isn't running
-    //     if (!_isHighlighting) {
-    //         _processHighlightQueue();
-    //     }
-    // }
-
-    // function _processHighlightQueue() {
-    //     // If the queue is empty, the tour is over!
-    //     if (_highlightQueue.length === 0) {
-    //         _isHighlighting = false;
-
-    //         console.log('[VoiceCommerce] Highlight tour finished! Starting 4-second cleanup timer...');
-
-    //         // Start the 4-second auto-cleanup timer
-    //         _autoClearTimer = setTimeout(_doClearHighlights, 4000);
-    //         return;
-    //     }
-
-    //     _isHighlighting = true;
-    //     _highlightSequenceNumber++;
-
-    //     var productId = _highlightQueue.shift();
-    //     var el = _store.findProduct(productId);
-
-    //     if (!el) {
-    //         _processHighlightQueue();
-    //         return;
-    //     }
-
-    //     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    //     el.classList.add('vc-highlight-active');
-
-    //     var badge = document.createElement('div');
-    //     badge.className = 'vc-highlight-badge';
-    //     badge.textContent = '#' + _highlightSequenceNumber;
-    //     el.appendChild(badge);
-
-    //     setTimeout(function () {
-    //         el.classList.remove('vc-highlight-active');
-    //         el.classList.add('vc-highlight-soft');
-    //         setTimeout(_processHighlightQueue, 250);
-    //     }, 1500);
-    // }
-
-    // function _doClearHighlights() {
-    //     console.log('[VoiceCommerce] Executing aggressive highlight cleanup!');
-
-    //     // 1. Reset all variables
-    //     if (_autoClearTimer) clearTimeout(_autoClearTimer);
-    //     _highlightQueue = [];
-    //     _isHighlighting = false;
-    //     _highlightSequenceNumber = 0;
-
-    //     // 2. Aggressively hunt down and destroy EVERY badge on the page
-    //     var badges = document.querySelectorAll('.vc-highlight-badge');
-    //     for (var i = 0; i < badges.length; i++) {
-    //         badges[i].parentNode.removeChild(badges[i]);
-    //     }
-
-    //     // 3. Strip the 'active' (pulsing) class from all products
-    //     var activeItems = document.querySelectorAll('.vc-highlight-active');
-    //     for (var j = 0; j < activeItems.length; j++) {
-    //         activeItems[j].classList.remove('vc-highlight-active');
-    //         activeItems[j].style.transform = '';
-    //     }
-
-    //     // 4. Strip the 'soft' (static) class from all products
-    //     var softItems = document.querySelectorAll('.vc-highlight-soft');
-    //     for (var k = 0; k < softItems.length; k++) {
-    //         softItems[k].classList.remove('vc-highlight-soft');
-    //         softItems[k].style.transform = '';
-    //     }
-    // }
-
     /* ── scroll_to_product ──────────────────────────────────────────────────── */
     function _doScrollToProduct(productId) {
         _doCloseCart();
@@ -3121,8 +3011,6 @@ function _doApplyFilter(filterType, filterValue, label) {
             icon.textContent = '🎙️';
         }
 
-        /* Stop mic if recording */
-        // _stopMic();
     }
 
     /* ── Toast notifications ────────────────────────────────────────────────── */

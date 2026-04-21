@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from typing import Any
 from dataclasses import dataclass
 
@@ -9,6 +10,8 @@ from voice_commerce.core.tools import tool_registry , cart_tools, checkout_tools
 from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
+
+_TOOL_EXECUTION_TIMEOUT_S = 5
 
 
 
@@ -76,9 +79,19 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         session=context.session_id,
     )
     try:
-        result: ToolResponse = await _TOOLS[tool_name](**merged_args)
+        async with asyncio.timeout(_TOOL_EXECUTION_TIMEOUT_S):
+            result: ToolResponse = await _TOOLS[tool_name](**merged_args)
         log.info("dispatcher_done", tool=tool_name, result=result.ai_text)
         return result
+    
+    except TimeoutError:
+        log.error(
+            "dispatcher_timeout",
+            tool=tool_name,
+            timeout_s=_TOOL_EXECUTION_TIMEOUT_S,
+            session=context.session_id,
+        )
+        return ToolResponse.error("That request took too long. Please try again.")
     
     except TypeError as exc:
         log.warning("dispatcher_arg_mismatch", tool=tool_name, error=str(exc))
