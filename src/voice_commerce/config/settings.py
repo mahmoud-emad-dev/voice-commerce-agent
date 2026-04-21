@@ -33,8 +33,20 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_port: int = 8000
     app_version: str = "0.1.0"
+    debug_payload_logs: bool = False
+    enable_public_demo: bool | None = None
     # Which domains can make requests to this API. In production, set this to frontend's real domain name.
     cors_allow_origins: list[str] = ["*"]
+
+    @property
+    def is_public_demo_enabled(self) -> bool:
+        """
+        Enable the demo page automatically in local debug mode unless explicitly overridden.
+        Safe default for public deployments remains off when APP_DEBUG is false.
+        """
+        if self.enable_public_demo is not None:
+            return self.enable_public_demo
+        return self.app_debug
 
     # =========================================================================
     # STORE SETTINGS

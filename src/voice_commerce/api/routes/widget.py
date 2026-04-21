@@ -42,6 +42,8 @@ from pathlib import Path
 from fastapi import APIRouter , Request , HTTPException 
 from fastapi.responses import FileResponse , JSONResponse , HTMLResponse
 
+from voice_commerce.config.settings import settings
+
 
 
 # Locate the static directory relative to this file
@@ -102,6 +104,9 @@ async def serve_embed_demo(request: Request) -> FileResponse:
  
     In production this endpoint would be removed (or gated behind auth).
     """
+    if not settings.is_public_demo_enabled:
+        raise HTTPException(status_code=404, detail="embed_demo.html not available")
+
     path = _STATIC_DIR / "embed_demo.html"
     if not path.exists():
         raise HTTPException(status_code=404, detail="embed_demo.html not found")

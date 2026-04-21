@@ -956,6 +956,10 @@
         /* Audio playback (Gemini → browser) */
         playbackCtx: null,
         nextPlayAt: 0,
+        aiSpeaking: false,
+        aiTurnActive: false,
+        pendingContextUpdate: false,
+        pendingContextTimer: null,
 
         /* Microphone (browser → Gemini) */
         isRecording: false,
@@ -978,6 +982,23 @@
         /* Current assistant message being built (streaming text) */
         currentAssistantEl: null,
     };
+
+    function _canSendContextUpdateNow() {
+        return !STATE.aiTurnActive && !STATE.aiSpeaking;
+    }
+
+    function _flushPendingContextUpdate() {
+        if (!STATE.pendingContextUpdate || !_canSendContextUpdateNow()) return;
+        STATE.pendingContextUpdate = false;
+        _sendContextUpdate(true);
+    }
+
+    function _queueContextUpdate(delayMs) {
+        clearTimeout(STATE.pendingContextTimer);
+        STATE.pendingContextTimer = setTimeout(function () {
+            _sendContextUpdate(false);
+        }, Math.max(0, delayMs || 0));
+    }
 
     /* ══════════════════════════════════════════════════════════════════════════
      * SECTION 6 — WEBSOCKET LAYER
@@ -1097,8 +1118,12 @@
         });
     }
 
-    function _sendContextUpdate() {
+    function _sendContextUpdate(force) {
         if (STATE.wsStatus !== 'connected') return;
+        if (!force && !_canSendContextUpdateNow()) {
+            STATE.pendingContextUpdate = true;
+            return;
+        }
 
         var cartItems = _getCartSnapshot();
         var realCartCount = _getCartCountFromSnapshot(cartItems);
@@ -1205,11 +1230,11 @@
             _setStatus('connected');
             _addSystemMsg(_i18n('connected'));
             // Wait half a second, then scan the screen!
-            setTimeout(_sendContextUpdate, 500); 
+            _queueContextUpdate(500); 
             
             // If you change filters/categories, update the AI again
             window.addEventListener('popstate', function() {
-                setTimeout(_sendContextUpdate, 800);
+                _queueContextUpdate(800);
             });
             // 3. THE FIX: Catch Filter and Category Clicks!
             // This listens to every click on the page. If the user clicks a link, 
@@ -1218,7 +1243,7 @@
             document.addEventListener('click', function(e) {
                 var target = e.target.closest('a, button, input[type="checkbox"], select');
                 if (target) {
-                    setTimeout(_sendContextUpdate, 800);
+                    _queueContextUpdate(800);
                 }
             });
         };
@@ -1276,6 +1301,7 @@
 
                 case 'status':
                     if (msg.status === 'done' || msg.status === 'ready') {
+                        STATE.aiTurnActive = false;
                         // TURN COMPLETE: The AI is done speaking.
                         // We MUST reset the bubble tracker so the NEXT turn starts a brand new bubble!
                         STATE.currentBubble = null;
@@ -1283,8 +1309,10 @@
                         _showTyping(false);
                         // Also update the header text so it doesn't say "Connecting..."
                         if (msg.status === 'ready') _setStatus('connected');
+                        _flushPendingContextUpdate();
 
                     } else if (msg.status === 'thinking') {
+                        STATE.aiTurnActive = true;
                         _showTyping(true);
                     }
                     break;
@@ -1409,6 +1437,7 @@
         STATE._speakingTimer = setTimeout(function () {
             STATE.aiSpeaking = false;
             _showTyping(false);
+            _flushPendingContextUpdate();
         }, (STATE.nextPlayAt - ctx.currentTime) * 1000 + 300);
     }
 
@@ -1763,7 +1792,6 @@
      *   set_search_query      — pre-fill store search input
      *   clear_highlights      — remove all highlight rings
      *   show_products         — render product cards in chat panel
-     *   navigate_to           — navigate to a URL (for search results pages)
      *   apply_filter          — set a price/category filter on the store page
      *   render_checkout       — render demo checkout wizard from full state
      *   close_checkout        — close demo checkout wizard
@@ -1844,10 +1872,6 @@
                 _closeModal();
                 /* Render product cards inside the chat panel */
                 _renderProductCards(msg.products);
-                break;
-            case 'navigate_to':
-                _closeModal();
-                if (msg.url) window.location.href = msg.url;
                 break;
 case 'apply_filter':
                 _closeModal();
@@ -2259,7 +2283,7 @@ function _flushQueuedHighlights() {
                         }
                     }
                     setTimeout(function () {
-                        _sendContextUpdate();
+                        _sendContextUpdate(false);
                     }, 250);
                 })
                 .catch(function (err) {
@@ -2268,7 +2292,7 @@ function _flushQueuedHighlights() {
         }
 
         setTimeout(function () {
-            _sendContextUpdate();
+            _sendContextUpdate(false);
         }, 250);
     }
 
@@ -2425,8 +2449,8 @@ function _doApplyFilter(filterType, filterValue, label) {
             _applyFilterDomFallback(filterType, filterValue);
         }
         _showToast(label || ('Filtered: ' + filterValue), 'info', 2200);
-        setTimeout(_sendContextUpdate, 250);
-        setTimeout(_sendContextUpdate, 900);
+        _queueContextUpdate(250);
+        _queueContextUpdate(900);
     }
 
     function _doApplySort(sortBy, label) {
@@ -2439,8 +2463,8 @@ function _doApplyFilter(filterType, filterValue, label) {
             _applySortDomFallback(sortBy);
         }
         _showToast(label || ('Sorted: ' + sortBy), 'info', 2200);
-        setTimeout(_sendContextUpdate, 250);
-        setTimeout(_sendContextUpdate, 900);
+        _queueContextUpdate(250);
+        _queueContextUpdate(900);
     }
 
     function _clearFilterDomFallback() {
@@ -3032,7 +3056,7 @@ function _doApplyFilter(filterType, filterValue, label) {
                 product_id: detail.product_id || null,
                 announce_to_ai: false,
             });
-            setTimeout(_sendContextUpdate, 50);
+            _queueContextUpdate(50);
         });
     }
 

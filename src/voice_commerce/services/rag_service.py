@@ -94,6 +94,7 @@ class RagService:
         self.retriever = Retriever(self.v_store)
         self._sync_complete = False
         self._products_indexed = 0
+        self._product_lookup: dict[int, Product] = {}
         self._category_summary: CategorySummary = {}
         self._products_by_category: ProductsByCategory = {}
         self._category_lookup: CategoryLookup = {}
@@ -494,6 +495,30 @@ class RagService:
             items = items[: max(1, int(limit))]
         return items
 
+    def _get_full_products_for_category(
+        self,
+        category: str,
+        *,
+        max_price: float | None = None,
+        in_stock_only: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Product]:
+        """Return full Product models for one resolved category using the cached catalog."""
+        snapshots = self.get_products_for_category(
+            category,
+            max_price=max_price,
+            in_stock_only=in_stock_only,
+            limit=limit,
+            offset=offset,
+        )
+        products: list[Product] = []
+        for item in snapshots:
+            product = self._product_lookup.get(int(item["id"]))
+            if product is not None:
+                products.append(product)
+        return products
+
     # ── Catalog sync ──────────────────────────────────────────────────────────
     async def sync_catalog(self) -> int:
         """
@@ -515,6 +540,8 @@ class RagService:
         if not all_products:
             log.warning("rag_sync_no_products")
             return 0
+
+        self._product_lookup = {product.id: product for product in all_products}
 
         # 1.5 Build category intelligence caches for prompt/context and deterministic retrieval.
         self._category_summary, self._products_by_category, self._category_lookup = (
@@ -578,6 +605,26 @@ class RagService:
             log.warning("rag_search_collection_not_ready_yet")
             return []
 
+        strict_category = self._strict_category_for_query(query)
+        if strict_category and not category:
+            category_results = self._get_full_products_for_category(
+                strict_category,
+                max_price=max_price,
+                in_stock_only=False,
+                limit=max(limit, 25),
+                offset=max(0, offset),
+            )
+            if category_results:
+                reranked_category_results = self._rerank_products_for_query(query, category_results)
+                log.info(
+                    "rag_search_category_browse_applied",
+                    query=query[:80],
+                    category=strict_category,
+                    available=len(category_results),
+                    returned=min(limit, len(reranked_category_results)),
+                )
+                return reranked_category_results[:limit]
+
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
         loop = asyncio.get_running_loop()
         try:
@@ -610,7 +657,6 @@ class RagService:
             }
             search_results = [product for product in search_results if product.id in allowed_ids]
 
-        strict_category = self._strict_category_for_query(query)
         if strict_category:
             constrained_results = [
                 product for product in search_results if strict_category in product.category_names

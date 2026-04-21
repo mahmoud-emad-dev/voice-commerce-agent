@@ -42,8 +42,12 @@ class _SearchQueryCacheEntry(TypedDict):
 _SEARCH_RESULT_CACHE: dict[str, dict[str, _SearchQueryCacheEntry]] = {}
 
 
-def _query_cache_key(query: str, max_price: float | None) -> str:
-    canonical = f"{query.strip().lower()}|{'' if max_price is None else f'{max_price:.2f}'}"
+def _query_cache_key(query: str, max_price: float | None, category: str | None) -> str:
+    canonical = (
+        f"{query.strip().lower()}|"
+        f"{'' if max_price is None else f'{max_price:.2f}'}|"
+        f"{(category or '').strip().lower()}"
+    )
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
 
 
@@ -65,6 +69,7 @@ def _format_category_result(category_name: str, summary: CategorySummaryEntry) -
 
 async def search_products(
     query: str,
+    category: str | None = None,
     max_price: float | None = None,
     limit: int = _DEFAULT_PAGE_SIZE,
     offset: int = 0,
@@ -87,6 +92,7 @@ async def search_products(
     log.info(
         "search_products_live_rag",
         query=query,
+        category=category,
         max_price=max_price,
         limit=requested_limit,
         offset=requested_offset,
@@ -101,7 +107,8 @@ async def search_products(
             return ToolResponse.error("I am currently updating my catalog database. Please give me a few seconds and try your search again.")
         # 1. Resolve cursor state for this session/query.
         session_cache = _ensure_session_cache(session_id)
-        cache_key = _query_cache_key(query, max_price)
+        resolved_category = rag.resolve_category_name(category) if category else None
+        cache_key = _query_cache_key(query, max_price, resolved_category)
         cache_entry = session_cache.get(cache_key)
         seen_ids = set(cache_entry["returned_ids"]) if cache_entry else set()
         effective_offset = requested_offset or (cache_entry["next_offset"] if cache_entry else 0)
@@ -117,6 +124,7 @@ async def search_products(
                 limit=fetch_size,
                 offset=rolling_offset,
                 max_price=max_price,
+                category=resolved_category,
             )
             if not batch:
                 break
@@ -138,8 +146,9 @@ async def search_products(
                     "Try a different keyword or adjust the price range."
                 )
             suffix = f" under ${max_price:.0f}" if max_price else ""
+            category_text = f" in {resolved_category}" if resolved_category else ""
             return ToolResponse.error(
-                f"I didn't find anything matching '{query}'{suffix}. "
+                f"I didn't find anything matching '{query}'{category_text}{suffix}. "
                 "Try different keywords or ask me what categories we carry."
             )
 

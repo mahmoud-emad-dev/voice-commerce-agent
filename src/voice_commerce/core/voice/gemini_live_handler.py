@@ -52,6 +52,10 @@ class GeminiLiveHandler:
             resumption_handle=self._resumption_handle,
         )
 
+    @staticmethod
+    def _payload_logging_enabled() -> bool:
+        return settings.app_debug and settings.debug_payload_logs
+
     # =========================================================================
     # Gemini Configuration ( Session - Prompt - Voice - Others)
     # =========================================================================
@@ -115,8 +119,9 @@ class GeminiLiveHandler:
             "gemini_system_prompt_built",
             prompt_chars=len(system_prompt),
             category_summary_lines=len(self._category_summary_text.splitlines()),
-            preview=system_prompt[:200],
         )
+        if self._payload_logging_enabled():
+            log.debug("gemini_system_prompt_preview", preview=system_prompt[:200])
         return system_prompt
 
     @property
@@ -189,7 +194,7 @@ class GeminiLiveHandler:
                 "Did you use 'async with handler.connect():'?"
             )   
         
-        log.debug("gemini_sending_text", text=text)
+        log.debug("gemini_sending_text", text_length=len(text))
 
         try:
             await self._session.send_client_content(
@@ -248,7 +253,7 @@ class GeminiLiveHandler:
 
         if not self.is_connected:
             raise RuntimeError("Cannot send tool result: not connected.")
-        log.debug("gemini_sending_tool_result",tool=tool_name, preview=result[:80])
+        log.debug("gemini_sending_tool_result", tool=tool_name, result_length=len(result))
 
         try:
             await self._session.send_tool_response(
@@ -317,8 +322,15 @@ class GeminiLiveHandler:
                     "4. Acknowledge this silently by outputting exactly the text '[SILENT_UPDATE]' and nothing else."
                 )
 
-        log.debug("gemini_injecting_context", items=len(products), filters=filters_text)
-        log.info("gemini_injecting_context", context_msg=context_msg)
+        log.info(
+            "gemini_injecting_context",
+            session_url=page.get("url", "Unknown"),
+            items=len(products),
+            filter_count=len(filters),
+            cart_count=page.get("cart_count", 0),
+        )
+        if self._payload_logging_enabled():
+            log.debug("gemini_injecting_context_payload", context_msg=context_msg)
         # Send to Gemini using the exact types.Content formatting your file uses
         try:
             await self._session.send_client_content(
@@ -402,13 +414,13 @@ class GeminiLiveHandler:
                         ## Transcriptions of User Input
                         input_trans = getattr(server_content, "input_transcription", None)
                         if input_trans and getattr(input_trans, "text", None):
-                            log.debug("gemini_input_transcript", text=input_trans.text[:80])
+                            log.debug("gemini_input_transcript", text_length=len(input_trans.text))
                             yield {"type": "input_transcript", "text": input_trans.text}
 
                         ## Transcriptions of Model Output
                         output_trans = getattr(server_content, "output_transcription", None)
                         if output_trans and getattr(output_trans, "text", None):
-                            log.debug("gemini_output_transcript", text=output_trans.text[:100])
+                            log.debug("gemini_output_transcript", text_length=len(output_trans.text))
                             yield {"type": "output_transcript", "text": output_trans.text}
 
 

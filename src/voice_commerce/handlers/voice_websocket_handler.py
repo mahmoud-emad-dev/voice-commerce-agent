@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import Any
 
 import structlog
 from fastapi import WebSocket, WebSocketDisconnect
 
+from voice_commerce.config.settings import settings
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler 
 from voice_commerce.core.voice  import audio_processor 
 from voice_commerce.core.tools import tool_dispatcher, cart_tools, checkout_tools
@@ -48,6 +50,7 @@ STATUS_ERROR      = "error"
 # In a real production app, this would be a database like Redis or Postgres.
 GLOBAL_SESSIONS: dict[str, list[dict[str, str]]] = {}
 GLOBAL_HANDLES: dict[str, str] = {}  # Stores Google's resumption handles
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 class VoiceWebSocketHandler:
     """
     Manages one WebSocket session from one browser client.
@@ -83,6 +86,18 @@ class VoiceWebSocketHandler:
         self.action_dispatcher = ActionDispatcher()
         log.info("voice_handler_created", session_id=self.session_id)
 
+    @staticmethod
+    def _payload_logging_enabled() -> bool:
+        return settings.app_debug and settings.debug_payload_logs
+
+    @staticmethod
+    def _sanitize_display_text(text: str) -> str:
+        """Remove non-display control characters before sending text to the chat UI."""
+        if not text:
+            return ""
+        cleaned = _CONTROL_CHAR_RE.sub("", text)
+        return cleaned.strip()
+
     async def _wait_for_gemini_connected(self, gemini: GeminiLiveHandler, timeout_s: float = 2.5) -> bool:
         """
         Wait briefly until Gemini is connected for this handler instance.
@@ -108,8 +123,8 @@ class VoiceWebSocketHandler:
             log.info(
                 "pending_user_text_flushed",
                 session_id=self.session_id,
-                preview=next_text[:80],
                 remaining=len(self._pending_texts),
+                text_length=len(next_text),
             )
 
         return flushed_count
@@ -132,8 +147,8 @@ class VoiceWebSocketHandler:
                 log.info(
                     "user_text_buffered_gemini_not_connected",
                     session_id=self.session_id,
-                    preview=user_text[:80],
                     pending_count=len(self._pending_texts),
+                    text_length=len(user_text),
                 )
                 return False
 
@@ -365,9 +380,15 @@ class VoiceWebSocketHandler:
                             cart_tools.sync_cart_from_browser(self.session_id, page.get("cart_items", []))
                             if checkout_tools.invalidate_checkout_if_cart_changed(self.session_id, page.get("cart_items", [])):
                                 await self._send_json({"type": "action", "action": "close_checkout"})
-                        log.info("context_update_received", session_id=self.session_id , filters=parsed.get("page", {}).get("active_filters", []) , items=len(parsed.get("products", [])))
-                        log.info("context_update_received", parsed=parsed)
-                        log.info("context_update_received", page=parsed.get("page", {}), products=parsed.get("products", []))
+                        log.info(
+                            "context_update_received",
+                            session_id=self.session_id,
+                            filter_count=len(parsed.get("page", {}).get("active_filters", [])),
+                            items=len(parsed.get("products", [])),
+                            cart_count=parsed.get("page", {}).get("cart_count", 0),
+                        )
+                        if self._payload_logging_enabled():
+                            log.debug("context_update_payload", parsed=parsed)
                         await gemini.inject_live_context(
                             page=parsed.get("page", {}),
                             products=parsed.get("products", [])
@@ -384,7 +405,11 @@ class VoiceWebSocketHandler:
 
                 self._user_started_interaction = True
                 self._input_mode = "text"
-                log.info("text_message_received",preview=user_text[:80], session_id=self.session_id)
+                log.info(
+                    "text_message_received",
+                    session_id=self.session_id,
+                    text_length=len(user_text),
+                )
 
                 # Save to memory transcript (used later for UI and DB saving)
                 self._transcript.append({"role": "user", "text": user_text})
@@ -428,11 +453,18 @@ class VoiceWebSocketHandler:
 
             # ──2 OUTPUT TRANSCRIPT (Text of what Gemini SAID) ──────────────────────
             elif event_type == "output_transcript":
+                cleaned_output_text = self._sanitize_display_text(event["text"])
                 if "[SILENT_UPDATE]" in event["text"]:
-                    log.info("output_transcript_silent_update",text=event["text"],session_id=self.session_id)
+                    log.info(
+                        "output_transcript_silent_update",
+                        session_id=self.session_id,
+                        text_length=len(event["text"]),
+                    )
+                    continue
+                if not cleaned_output_text:
                     continue
                     
-                ai_transcript_text: str = event["text"]
+                ai_transcript_text = cleaned_output_text
                 ai_transcript_parts.append(ai_transcript_text)
 
                 # Send the growing transcript to the browser (for live captioning)
@@ -444,8 +476,14 @@ class VoiceWebSocketHandler:
 
             # ── 3. INPUT TRANSCRIPT (Text of what the User said in audio mode) ──────────
             elif event_type == "input_transcript" and  self._input_mode == "audio": 
-                user_transcript_text: str = event["text"]
-                log.info("user_speech_transcribed",text=user_transcript_text[:80],session_id=self.session_id)
+                user_transcript_text = self._sanitize_display_text(event["text"])
+                if not user_transcript_text:
+                    continue
+                log.info(
+                    "user_speech_transcribed",
+                    session_id=self.session_id,
+                    text_length=len(user_transcript_text),
+                )
                 user_transcript_parts.append(user_transcript_text)
                 # Send the growing transcript to the browser (for live captioning)
                 await self._send_json({
@@ -456,13 +494,24 @@ class VoiceWebSocketHandler:
 
             # ── 4. TEXT CHUNK (rare in audio mode) ───────────────────────────
             elif event_type == MSG_TEXT:
-                log.info("text_chunk_received",text=event["text"],session_id=self.session_id)
+                cleaned_text = self._sanitize_display_text(event["text"])
+                if self._input_mode == "audio":
+                    log.debug("text_chunk_skipped_audio_mode", session_id=self.session_id)
+                    continue
+                if not cleaned_text:
+                    log.debug("text_chunk_skipped_empty_after_sanitize", session_id=self.session_id)
+                    continue
+                log.info(
+                    "text_chunk_received",
+                    session_id=self.session_id,
+                    text_length=len(event["text"]),
+                )
                 # THE FIX: Intercept the silent acknowledgment so it doesn't show in the chat UI!
                 if "[SILENT_UPDATE]" in event["text"]:
                     continue
                 await self._send_json({
                     "type": MSG_TEXT,
-                    "text": event["text"],
+                    "text": cleaned_text,
                 })
 
             # ── 5. TOOL CALL ─────────────────────────────────────────────────
@@ -475,7 +524,12 @@ class VoiceWebSocketHandler:
                 # 1. Execute the tool and get the result string AS Execute the python tool using our dispatcher (Returns our strict ToolResponse object!)
                 context = tool_dispatcher.ToolContext(session_id=self.session_id)
                 tool_response = await tool_dispatcher.execute(tool_name, tool_args, context)
-                log.info("tool_call_result", tool=tool_name,preview=tool_response.ai_text[:100], session=self.session_id)
+                log.info(
+                    "tool_call_result",
+                    tool=tool_name,
+                    session=self.session_id,
+                    response_length=len(tool_response.ai_text),
+                )
                 
                 # 2. TRAFFIC TO BROWSER UI
                 # Send the object to the Action Dispatcher to calculate visual commands
@@ -528,7 +582,13 @@ class VoiceWebSocketHandler:
                     ai_transcript_parts.clear()
                     log.debug("turn_saved ai_transcript", length=len(full_ai_text),session=self.session_id)
                                 
-                log.info("memory", memory=self._transcript)
+                log.info(
+                    "memory_turn_saved",
+                    session=self.session_id,
+                    total_turns=len(self._transcript),
+                    user_turns=sum(1 for item in self._transcript if item["role"] == "user"),
+                    ai_turns=sum(1 for item in self._transcript if item["role"] == "ai"),
+                )
                 # Tell the browser to unlock the text box and mic button
                 await self._send_status(STATUS_DONE)
 
@@ -580,10 +640,10 @@ class VoiceWebSocketHandler:
             parsed_data = json.loads(raw_text)
             if isinstance(parsed_data, dict) :
                 user_text = parsed_data.get("text", "")
-                log.debug("text_message_parsed_as_json", text=user_text[:80])
+                log.debug("text_message_parsed_as_json", text_length=len(user_text))
                 return user_text
             if isinstance(parsed_data, str):
-                log.debug("text_message_parsed_as_plain_string", text=parsed_data[:80])
+                log.debug("text_message_parsed_as_plain_string", text_length=len(parsed_data))
                 return parsed_data
         except (json.JSONDecodeError, ValueError):
             pass
