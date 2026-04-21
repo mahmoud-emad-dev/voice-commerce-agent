@@ -56,6 +56,7 @@ TAX_RATE = 0.08
 
 
 def _snapshot_from_cart(cart: Cart) -> list[dict]:
+    """Capture the cart in a serializable form for the demo checkout flow."""
     return [
         {
             "product_id": item.product_id,
@@ -69,6 +70,7 @@ def _snapshot_from_cart(cart: Cart) -> list[dict]:
 
 
 def _normalize_snapshot_items(items: list[dict]) -> list[dict]:
+    """Normalize cart rows so two snapshots can be compared safely."""
     normalized: list[dict] = []
     for raw in items:
         try:
@@ -79,12 +81,16 @@ def _normalize_snapshot_items(items: list[dict]) -> list[dict]:
             continue
         if quantity <= 0:
             continue
-        normalized.append({
-            "product_id": product_id,
-            "quantity": quantity,
-            "price": price,
-        })
-    return sorted(normalized, key=lambda item: (item["product_id"], item["quantity"], item["price"]))
+        normalized.append(
+            {
+                "product_id": product_id,
+                "quantity": quantity,
+                "price": price,
+            }
+        )
+    return sorted(
+        normalized, key=lambda item: (item["product_id"], item["quantity"], item["price"])
+    )
 
 
 def _shipping_cost(subtotal: float, shipping: ShippingOption | None) -> float:
@@ -95,7 +101,10 @@ def _shipping_cost(subtotal: float, shipping: ShippingOption | None) -> float:
     return STANDARD_SHIPPING_FEE
 
 
-def _compute_totals(cart_snapshot: list[dict], shipping: ShippingOption | None = None) -> dict[str, float]:
+def _compute_totals(
+    cart_snapshot: list[dict], shipping: ShippingOption | None = None
+) -> dict[str, float]:
+    """Compute demo checkout totals from the frozen cart snapshot."""
     subtotal = round(sum(float(item.get("subtotal", 0)) for item in cart_snapshot), 2)
     shipping_cost = round(_shipping_cost(subtotal, shipping), 2)
     tax = round(subtotal * TAX_RATE, 2)
@@ -126,6 +135,7 @@ def _generate_order_id() -> str:
 
 
 def _serialize_state(state: CheckoutState, *, demo_notice: str | None = None) -> dict:
+    """Build the browser payload that drives the demo checkout UI."""
     return {
         "checkout": {
             "step": state.step,
@@ -146,6 +156,7 @@ def _serialize_state(state: CheckoutState, *, demo_notice: str | None = None) ->
 
 
 def invalidate_checkout_if_cart_changed(session_id: str, browser_items: list[dict]) -> bool:
+    """Close an active checkout if the browser cart no longer matches it."""
     state = get_checkout(session_id)
     if state is None or not state.is_open:
         return False
@@ -160,10 +171,13 @@ def invalidate_checkout_if_cart_changed(session_id: str, browser_items: list[dic
 
 
 async def begin_checkout(session_id: str = "default") -> ToolResponse:
+    """Open a fresh demo checkout from the current in-memory cart."""
     cart = cart_tools.get_cart(session_id)
     if cart.is_empty():
         clear_checkout(session_id)
-        return ToolResponse.error("Your cart is empty. Add something first, then I can start checkout.")
+        return ToolResponse.error(
+            "Your cart is empty. Add something first, then I can start checkout."
+        )
 
     state = CheckoutState(
         session_id=session_id,
@@ -191,6 +205,7 @@ async def set_checkout_option(
     value: str,
     session_id: str = "default",
 ) -> ToolResponse:
+    """Apply one checkout choice and advance the demo flow to the next step."""
     state = get_checkout(session_id)
     if state is None or not state.is_open:
         return ToolResponse.error("Checkout is not active yet. Say checkout when you're ready.")
@@ -221,18 +236,21 @@ async def set_checkout_option(
     return ToolResponse.success(
         ai_text=(
             f"Great. Your demo total is ${state.totals['total']:.2f} with {_payment_summary(state.payment)}. "
-            "Say \"place order\" to confirm."
+            'Say "place order" to confirm.'
         ),
         data=_serialize_state(state),
     )
 
 
 async def confirm_checkout(session_id: str = "default") -> ToolResponse:
+    """Finalize the demo checkout and clear the shadow cart."""
     state = get_checkout(session_id)
     if state is None or not state.is_open:
         return ToolResponse.error("Checkout is not active yet.")
     if state.shipping is None or state.payment is None:
-        return ToolResponse.error("I still need both shipping and payment before I can place the demo order.")
+        return ToolResponse.error(
+            "I still need both shipping and payment before I can place the demo order."
+        )
 
     state.order_id = _generate_order_id()
     state.step = "success"
@@ -252,6 +270,7 @@ async def confirm_checkout(session_id: str = "default") -> ToolResponse:
 
 
 async def cancel_checkout(session_id: str = "default") -> ToolResponse:
+    """Close the current demo checkout without changing the cart contents."""
     state = get_checkout(session_id)
     if state is None:
         return ToolResponse.success(

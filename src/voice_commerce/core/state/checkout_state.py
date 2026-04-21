@@ -12,6 +12,8 @@ PaymentOption = Literal["card", "paypal"]
 
 @dataclass
 class CheckoutState:
+    """Mutable in-memory snapshot for one demo checkout session."""
+
     session_id: str
     step: CheckoutStep = "review"
     profile_id: str = "default_demo"
@@ -24,9 +26,11 @@ class CheckoutState:
 
     @property
     def is_open(self) -> bool:
+        """True while the checkout can still be updated by the user."""
         return self.step not in {"success", "cancelled"}
 
     def touch(self) -> None:
+        """Refresh the timestamp whenever the checkout state changes."""
         self.last_updated_at = datetime.utcnow().isoformat()
 
 
