@@ -642,4 +642,6 @@ class RagService:
             "products_indexed": self._products_indexed,
             "qdrant_count": self.v_store.count,
             "category_count": len(self._category_summary),
+            "embedder_ready": embedder.is_ready(),
+            "embedder_error": embedder.last_error(),
         }

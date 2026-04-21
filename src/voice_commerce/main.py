@@ -30,10 +30,23 @@ from fastapi.staticfiles import StaticFiles
 from voice_commerce.config.settings import settings
 from voice_commerce.api.routes import health , voice ,widget
 from voice_commerce.api.middleware.cors import add_cors_middleware
+from voice_commerce.core.rag import embedder
 from voice_commerce.services import woocommerce_client
 from voice_commerce.services.rag_service import get_rag_service
 
 log = structlog.get_logger(__name__)
+
+
+async def _warm_rag_pipeline() -> None:
+    """Warm the embedder and then sync the catalog without blocking app startup."""
+    rag = get_rag_service()
+    try:
+        await embedder.warmup()
+        log.info("app_startup_embedder_warmed")
+        indexed = await rag.sync_catalog()
+        log.info("app_startup_rag_catalog_sync_finished", indexed=indexed)
+    except Exception as exc:
+        log.exception("app_startup_rag_pipeline_failed", error=str(exc))
 
 
 def configure_logging() -> None:
@@ -115,8 +128,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
 
     # ── PHASE 7: START RAG BRAIN SYNC ──
     # The AI will instantly embed the CSV products in the background.
-    rag = get_rag_service()
-    asyncio.create_task(rag.sync_catalog())
+    get_rag_service()
+    asyncio.create_task(_warm_rag_pipeline())
     log.info("app_startup_rag_service_initialized")
     #-------------------------------------------------------------------------------------------------------------------
     yield

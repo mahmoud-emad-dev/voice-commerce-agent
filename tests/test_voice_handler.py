@@ -31,10 +31,13 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
 
+from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
+from voice_commerce.handlers.voice_websocket_handler import VoiceWebSocketHandler
 from voice_commerce.main import create_app
 
 
@@ -137,6 +140,39 @@ class TestVoiceWebSocketProtocol:
                 json.loads(raw)
             except json.JSONDecodeError as e:
                 pytest.fail(f"Server sent invalid JSON: {raw!r}. Error: {e}")
+
+
+class FakeGeminiSession:
+    """Small fake for queueing tests that don't need the real Gemini API."""
+
+    def __init__(self, is_connected: bool = False) -> None:
+        self.is_connected = is_connected
+        self.sent_texts: list[str] = []
+
+    async def send_text(self, text: str) -> None:
+        self.sent_texts.append(text)
+
+
+async def test_user_text_is_buffered_until_gemini_connects() -> None:
+    handler = VoiceWebSocketHandler(session_id="buffered-text-test")
+    gemini = FakeGeminiSession(is_connected=False)
+    handler._gemini = cast(GeminiLiveHandler, gemini)
+
+    sent_immediately = await handler._queue_or_send_user_text(
+        "hello",
+        cast(GeminiLiveHandler, gemini),
+    )
+
+    assert sent_immediately is False
+    assert handler._pending_texts == ["hello"]
+    assert gemini.sent_texts == []
+
+    gemini.is_connected = True
+    flushed_count = await handler._flush_pending_texts(cast(GeminiLiveHandler, gemini))
+
+    assert flushed_count == 1
+    assert handler._pending_texts == []
+    assert gemini.sent_texts == ["hello"]
 
 
 @pytest.mark.integration

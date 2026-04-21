@@ -9,10 +9,11 @@
 # ==============================================================================
 
 from __future__ import annotations
-import time
-import json
-from typing import Any
+
 import asyncio
+import json
+import time
+from typing import Any
 
 import structlog
 from fastapi import WebSocket, WebSocketDisconnect
@@ -76,6 +77,9 @@ class VoiceWebSocketHandler:
         self._user_started_interaction = False
         self._startup_greeting_sent = False
         self._startup_greeting_task: asyncio.Task[None] | None = None
+        self._pending_texts: list[str] = []
+        self._pending_texts_lock = asyncio.Lock()
+        self._pending_text_flush_task: asyncio.Task[None] | None = None
         self.action_dispatcher = ActionDispatcher()
         log.info("voice_handler_created", session_id=self.session_id)
 
@@ -92,6 +96,66 @@ class VoiceWebSocketHandler:
                 return True
             await asyncio.sleep(0.05)
         return gemini.is_connected and self._gemini is gemini
+
+    async def _flush_pending_texts_locked(self, gemini: GeminiLiveHandler) -> int:
+        """Send queued typed inputs to Gemini in the original order."""
+        flushed_count = 0
+
+        while self._pending_texts and gemini.is_connected and self._gemini is gemini:
+            next_text = self._pending_texts.pop(0)
+            await gemini.send_text(next_text)
+            flushed_count += 1
+            log.info(
+                "pending_user_text_flushed",
+                session_id=self.session_id,
+                preview=next_text[:80],
+                remaining=len(self._pending_texts),
+            )
+
+        return flushed_count
+
+    async def _flush_pending_texts(self, gemini: GeminiLiveHandler) -> int:
+        """Flush pending typed inputs if the Gemini live session is ready."""
+        async with self._pending_texts_lock:
+            return await self._flush_pending_texts_locked(gemini)
+
+    async def _queue_or_send_user_text(self, user_text: str, gemini: GeminiLiveHandler) -> bool:
+        """
+        Preserve typed user input across the Gemini startup race.
+
+        Returns True when the text was sent immediately, False when it was buffered.
+        """
+        async with self._pending_texts_lock:
+            self._pending_texts.append(user_text)
+
+            if not gemini.is_connected or self._gemini is not gemini:
+                log.info(
+                    "user_text_buffered_gemini_not_connected",
+                    session_id=self.session_id,
+                    preview=user_text[:80],
+                    pending_count=len(self._pending_texts),
+                )
+                return False
+
+            await self._flush_pending_texts_locked(gemini)
+            return True
+
+    async def _flush_pending_texts_when_ready(self, gemini: GeminiLiveHandler) -> None:
+        """Wait for Gemini to connect, then send any queued typed inputs."""
+        try:
+            while self._gemini is gemini:
+                if await self._wait_for_gemini_connected(gemini, timeout_s=0.5):
+                    flushed_count = await self._flush_pending_texts(gemini)
+                    if flushed_count:
+                        log.info(
+                            "pending_user_texts_fully_flushed",
+                            session_id=self.session_id,
+                            flushed_count=flushed_count,
+                        )
+                    return
+        except asyncio.CancelledError:
+            log.debug("pending_text_flush_cancelled", session_id=self.session_id)
+            raise
 
 
     async def handle(self, websocket: WebSocket) -> None:
@@ -119,6 +183,10 @@ class VoiceWebSocketHandler:
             # 2 ====== Open the Gemini Live session ======
             async with GeminiLiveHandler(transcript=self._transcript , resumption_handle=self._resumption_handle) as gemini:
                 self._gemini = gemini
+                self._pending_text_flush_task = asyncio.create_task(
+                    self._flush_pending_texts_when_ready(gemini),
+                    name=f"pending_text_flush:{self.session_id}",
+                )
                 await self._send_status(STATUS_READY, "Ready — speak or type")
 
                 # ── 2.1 Proactive Greeting (Only on first connection) ──────────
@@ -197,6 +265,13 @@ class VoiceWebSocketHandler:
                 except asyncio.CancelledError:
                     pass
             self._startup_greeting_task = None
+            if self._pending_text_flush_task is not None and not self._pending_text_flush_task.done():
+                self._pending_text_flush_task.cancel()
+                try:
+                    await self._pending_text_flush_task
+                except asyncio.CancelledError:
+                    pass
+            self._pending_text_flush_task = None
             self._gemini = None
             log.info("ws_handler_finished", session_id=self.session_id,total_turns=len(self._transcript))
 
@@ -316,11 +391,9 @@ class VoiceWebSocketHandler:
                 # Signal browser: AI is processing
                 await self._send_status(STATUS_THINKING)
 
-                # Send the text to Google
-                if gemini.is_connected:
-                    await gemini.send_text(user_text)
-                else:
-                    log.info("user_text_dropped_gemini_not_connected", session_id=self.session_id)
+                sent_immediately = await self._queue_or_send_user_text(user_text, gemini)
+                if not sent_immediately:
+                    await self._send_status(STATUS_THINKING, "Connecting to AI session...")
 
 
             
