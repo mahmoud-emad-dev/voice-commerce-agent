@@ -30,6 +30,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from voice_commerce.config.settings import settings
+
 
 def add_cors_middleware(app: FastAPI) -> None:
     """
@@ -52,11 +54,7 @@ def add_cors_middleware(app: FastAPI) -> None:
     # For local testing, we allow all origins. 
     # Before GitHub/Production, change this to your actual WordPress URL.
 
-    allowed_origins = [
-        "*", 
-        # "http://localhost:8080",      # Example local WordPress
-        # "https://my-real-store.com"   # Example production WordPress
-    ]
+    allowed_origins = settings.cors_allow_origins or ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,  
