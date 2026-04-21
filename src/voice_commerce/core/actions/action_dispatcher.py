@@ -401,7 +401,6 @@ class ActionDispatcher:
     #         update_badge(0),
     #         notify("Cart cleared.", "info"),
     #     ]
-
     # def _on_set_search(
     #     self, args: dict, result: dict
     # ) -> list[BrowserAction]:
@@ -410,25 +409,6 @@ class ActionDispatcher:
     #     submit = args.get("submit", False)
     #     return [SetSearchQuery(query=query, submit=submit)]
 
-    # def _on_rag_search(
-    #     self, args: dict, result: dict
-    # ) -> list[BrowserAction]:
-    #     """
-    #     After RAG semantic search: highlight top result.
-    #     RAG results may come from rag_service.py as a list of product dicts.
-    #     """
-    #     products = result.get("products", [])
-    #     if not products:
-    #         return [notify("No matching products found.", "info")]
-
-    #     actions: list[BrowserAction] = [ClearHighlights()]
-    #     for i, product in enumerate(products[:4]):
-    #         pid = product.get("id")
-    #         if pid:
-    #             actions.append(
-    #                 HighlightProduct(product_id=pid, scroll=(i == 0))
-    #             )
-    #     return actions
     # # ── Fallback: any tool with 'error' key ───────────────────────────────────
     # def _generic_error_check(self, result: dict) -> list[BrowserAction]:
     #     """Utility — call from any handler to surface errors as notifications."""

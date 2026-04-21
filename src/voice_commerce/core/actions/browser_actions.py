@@ -273,14 +273,3 @@ def apply_sort(
     return ApplySort(sort_by=sort_by, label=label)
 
 
-# def close_cart() -> CloseCart:
-#     return CloseCart()
-
-# def show_modal(product_id: int, product_name: str) -> ShowProductModal:
-#     return ShowProductModal(product_id=product_id, product_name=product_name)
-
-# def set_search(query: str, submit: bool = False) -> SetSearchQuery:
-#     return SetSearchQuery(query=query, submit=submit)
-
-# def clear_highlights() -> ClearHighlights:
-#     return ClearHighlights()
