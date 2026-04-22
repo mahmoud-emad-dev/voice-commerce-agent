@@ -533,6 +533,13 @@ class RagService:
         try:
             wc_client = get_client()
             all_products = await wc_client.list_all_products()
+            # Exclude any products designated as 'women' (in name, categories, tags)
+            all_products = [
+                p for p in all_products 
+                if "women" not in p.name.lower() 
+                and not any("women" in c.name.lower() for c in p.categories)
+                and not any("women" in t.name.lower() for t in getattr(p, "tags", []))
+            ]
         except Exception as e:
             log.exception("rag_sync_woocommerce_error", error=str(e))
             return 0
