@@ -7,7 +7,7 @@ The project is structured as a full voice-commerce system: a widget captures use
 ## Preview
 
 <p align="center">
-  <img src="docs/Screenshot%201.png" alt="Voice Commerce Agent storefront with the voice widget open" width="100%" />
+  <img src="docs/demo/Screenshot%201.png" alt="Voice Commerce Agent storefront with the voice widget open" width="100%" />
 </p>
 
 <p align="center"><em>Hero shot: storefront experience with the voice widget open.</em></p>
@@ -15,12 +15,18 @@ The project is structured as a full voice-commerce system: a widget captures use
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/Screenshot%202%20__%20Search%20results%20in%20action.png" alt="Search results in action with highlighted products and widget transcript" width="100%" />
+      <img src="docs/demo/Screenshot%202%20__%20Search%20results%20in%20action.png" alt="Search results in action with highlighted products and widget transcript" width="100%" />
       <p><strong>Search results in action</strong><br />Shows retrieval, tool calling, and browser highlights working together.</p>
     </td>
     <td width="50%">
-      <img src="docs/Screenshot%203%20__Cart%20%2B%20checkout%20flow.png" alt="Cart and checkout flow with order summary and shipping options" width="100%" />
+      <img src="docs/demo/Screenshot%203%20__Cart%20%2B%20checkout%20flow.png" alt="Cart and checkout flow with order summary and shipping options" width="100%" />
       <p><strong>Cart and checkout flow</strong><br />Shows the end-to-end purchase funnel with checkout state rendered in the storefront.</p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/demo/Screenshot%204%20__%20Voice-guided%20filtering%20and%20ranking.png" alt="Voice-guided filtering and ranking with storefront facets updated from the assistant request" width="100%" />
+      <p><strong>Voice-guided filtering and ranking</strong><br />Shows the assistant narrowing results with filters and sorting so the storefront reflects the shopper's constraints.</p>
     </td>
   </tr>
 </table>
