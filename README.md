@@ -6,20 +6,26 @@ The project is structured as a full voice-commerce system: a widget captures use
 
 ## Preview
 
-Place project media here before publishing:
+<p align="center">
+  <img src="docs/Screenshot%201.png" alt="Voice Commerce Agent storefront with the voice widget open" width="100%" />
+</p>
 
-- `docs/demo/hero.gif`
-- `docs/demo/search-results.png`
-- `docs/demo/cart-flow.png`
-- `docs/demo/checkout-flow.png`
+<p align="center"><em>Hero shot: storefront experience with the voice widget open.</em></p>
 
-Suggested embeds:
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/Screenshot%202%20__%20Search%20results%20in%20action.png" alt="Search results in action with highlighted products and widget transcript" width="100%" />
+      <p><strong>Search results in action</strong><br />Shows retrieval, tool calling, and browser highlights working together.</p>
+    </td>
+    <td width="50%">
+      <img src="docs/Screenshot%203%20__Cart%20%2B%20checkout%20flow.png" alt="Cart and checkout flow with order summary and shipping options" width="100%" />
+      <p><strong>Cart and checkout flow</strong><br />Shows the end-to-end purchase funnel with checkout state rendered in the storefront.</p>
+    </td>
+  </tr>
+</table>
 
-```md
-![Voice commerce flow](docs/demo/hero.gif)
-![Search results](docs/demo/search-results.png)
-![Cart flow](docs/demo/cart-flow.png)
-```
+These screenshots capture the main user journey: greet the shopper, find products with natural language, highlight matches on the page, and move through cart to checkout.
 
 ## Features
 
