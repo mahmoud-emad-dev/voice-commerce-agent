@@ -97,7 +97,51 @@ class VoiceWebSocketHandler:
         if not text:
             return ""
         cleaned = _CONTROL_CHAR_RE.sub("", text)
-        return cleaned.strip()
+        return cleaned if cleaned.strip() else ""
+
+    @staticmethod
+    def _merge_transcript_text(existing: str, incoming: str) -> str:
+        """
+        Merge streamed transcript chunks without dropping natural spaces.
+
+        Gemini transcription updates may arrive as either:
+        - cumulative text buffers
+        - delta fragments
+        - slightly overlapping fragments
+        """
+        left = str(existing or "")
+        right = str(incoming or "")
+        if not left:
+            return right
+        if not right:
+            return left
+
+        if right.startswith(left):
+            return right
+        if left.startswith(right):
+            return left
+
+        overlap = 0
+        max_overlap = min(len(left), len(right))
+        for size in range(max_overlap, 0, -1):
+            if left[-size:] == right[:size]:
+                overlap = size
+                break
+
+        suffix = right[overlap:]
+        if not suffix:
+            return left
+
+        last_char = left[-1]
+        first_char = suffix[0]
+        needs_space = (
+            not last_char.isspace()
+            and not first_char.isspace()
+            and last_char.isalnum()
+            and first_char.isalnum()
+        )
+
+        return left + (" " if needs_space else "") + suffix
 
     async def _wait_for_gemini_connected(
         self, gemini: GeminiLiveHandler, timeout_s: float = 2.5
@@ -471,8 +515,8 @@ class VoiceWebSocketHandler:
             `gemini.receive_events()` yields a continuous stream of dictionaries.
             We stay in this `async for` loop for the entire conversation.
         """
-        ai_transcript_parts: list[str] = []
-        user_transcript_parts: list[str] = []
+        ai_transcript_text = ""
+        user_transcript_text = ""
         async for event in gemini.receive_events():
             event_type = event.get("type")
 
@@ -497,26 +541,29 @@ class VoiceWebSocketHandler:
                 if not cleaned_output_text:
                     continue
 
-                ai_transcript_text = cleaned_output_text
-                ai_transcript_parts.append(ai_transcript_text)
+                ai_transcript_text = self._merge_transcript_text(
+                    ai_transcript_text, cleaned_output_text
+                )
 
-                # Send the growing transcript to the browser (for live captioning)
+                # Send the growing transcript to the browser as a cumulative caption buffer.
                 await self._send_json(
                     {"type": MSG_TRANSCRIPT, "role": "ai", "text": ai_transcript_text}
                 )
 
             # ── 3. INPUT TRANSCRIPT (Text of what the User said in audio mode) ──────────
             elif event_type == "input_transcript" and self._input_mode == "audio":
-                user_transcript_text = self._sanitize_display_text(event["text"])
-                if not user_transcript_text:
+                user_chunk_text = self._sanitize_display_text(event["text"])
+                if not user_chunk_text:
                     continue
                 log.info(
                     "user_speech_transcribed",
                     session_id=self.session_id,
-                    text_length=len(user_transcript_text),
+                    text_length=len(user_chunk_text),
                 )
-                user_transcript_parts.append(user_transcript_text)
-                # Send the growing transcript to the browser (for live captioning)
+                user_transcript_text = self._merge_transcript_text(
+                    user_transcript_text, user_chunk_text
+                )
+                # Send the growing transcript to the browser as a cumulative caption buffer.
                 await self._send_json(
                     {"type": MSG_TRANSCRIPT, "role": "user", "text": user_transcript_text}
                 )
@@ -603,20 +650,20 @@ class VoiceWebSocketHandler:
                 # One AI response turn finished.
                 # In voice mode: DON'T break — keep looping for the next turn.
                 # Save completed transcript, reset status, re-enable UI.
-                if user_transcript_parts:
-                    full_user_text = "".join(user_transcript_parts)
+                if user_transcript_text:
+                    full_user_text = user_transcript_text
                     self._transcript.append({"role": "user", "text": full_user_text})
-                    user_transcript_parts.clear()
+                    user_transcript_text = ""
                     log.debug(
                         "turn_saved user_transcript",
                         length=len(full_user_text),
                         session=self.session_id,
                     )
 
-                if ai_transcript_parts:
-                    full_ai_text = "".join(ai_transcript_parts)
+                if ai_transcript_text:
+                    full_ai_text = ai_transcript_text
                     self._transcript.append({"role": "ai", "text": full_ai_text})
-                    ai_transcript_parts.clear()
+                    ai_transcript_text = ""
                     log.debug(
                         "turn_saved ai_transcript",
                         length=len(full_ai_text),

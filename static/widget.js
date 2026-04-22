@@ -171,19 +171,19 @@
     var CSS = [
         /* ── Theme variables ──────────────────────────────────────────────────── */
         '.vc-root {',
-        '  --vc-accent:       #6365f1c1;', /* Modern Indigo */
+        '  --vc-accent:       #6366f1;',
         '  --vc-accent-dark:  #4f46e5;',
-        '  --vc-accent-light: rgba(99, 102, 241, 0.15);',
+        '  --vc-accent-light: rgba(99, 102, 241, 0.14);',
         '  --vc-success:      #10b981;',
         '  --vc-error:        #ef4444;',
         '  --vc-warning:      #f59e0b;',
         '  --vc-info:         #3b82f6;',
-        '  --vc-surface:      #18181b;', /* Deep Charcoal Panel */
-        '  --vc-surface2:     #27272a;', /* Transcript Background */
-        '  --vc-surface3:     #3f3f46;', /* Borders & Buttons */
+        '  --vc-surface:      #18181b;',
+        '  --vc-surface2:     #27272a;',
+        '  --vc-surface3:     #3f3f46;',
         '  --vc-border:       #3f3f46;',
         '  --vc-border2:      #52525b;',
-        '  --vc-text:         #f4f4f5;', /* Crisp White Text */
+        '  --vc-text:         #f4f4f5;',
         '  --vc-text2:        #a1a1aa;',
         '  --vc-text3:        #71717a;',
         '  --vc-shadow:       0 8px 32px rgba(0,0,0,0.40);',
@@ -241,6 +241,10 @@
         '@keyframes vc-spin {',
         '  to{transform:rotate(360deg)}',
         '}',
+        '@keyframes vc-mic-ring {',
+        '  0%{transform:scale(0.9);opacity:0.75}',
+        '  100%{transform:scale(1.20);opacity:0}',
+        '}',
 
         /* ── Floating action button ───────────────────────────────────────────── */
         '.vc-fab {',
@@ -260,11 +264,23 @@
         '  user-select:none;',
         '  -webkit-tap-highlight-color:transparent;',
         '  outline:none;',
+        '  overflow:visible;',
+        '}',
+        '.vc-fab::before,.vc-fab::after{',
+        '  content:"";',
+        '  position:absolute;',
+        '  inset:-3px;',
+        '  border-radius:50%;',
+        '  border:5px solid transparent;',
+        '  opacity:50;',
+        '  pointer-events:none;',
         '}',
         '.vc-fab:hover{transform:scale(1.08);background:var(--vc-accent-dark);}',
         '.vc-fab:active{transform:scale(0.96);}',
         '.vc-fab.vc-fab--open{background:var(--vc-accent-dark);}',
-        '.vc-fab.vc-fab--recording{background:#dc2626;animation:vc-recording-pulse 1.2s infinite;}',
+        '.vc-fab.vc-fab--recording{background:#dc2626;animation:vc-recording-pulse 1.2s infinite;box-shadow:0 0 0 5px rgba(241, 94, 94, 0.16),0 0 0 10px rgba(220,38,38,0.12),0 0 32px rgba(220,38,38,0.40),0 14px 30px rgba(127,29,29,0.34);}',
+        '.vc-fab.vc-fab--recording::before{border-color:rgba(242, 173, 173, 0.95);box-shadow:0 0 14px rgba(239, 43, 43, 0.2);animation:vc-mic-ring 1.15s ease-out infinite;opacity:1;}',
+        '.vc-fab.vc-fab--recording::after{inset:-10px;border-width:5px;border-color:rgba(248,113,113,0.72);box-shadow:0 0 18px rgba(220,38,38,0.18);animation:vc-mic-ring 1.15s ease-out 0.28s infinite;opacity:1;}',
         '.vc-fab.vc-fab--connecting{animation:vc-spin 1s linear infinite;}',
 
         /* Position variants */
@@ -321,7 +337,9 @@
 
         /* ── Panel header ─────────────────────────────────────────────────────── */
         '.vc-header{',
-        '  background:var(--vc-accent);',
+        '  background:linear-gradient(180deg, rgba(99,102,241,0.18), rgba(63,63,70,0.18) 45%, rgba(24,24,27,0.98) 100%);',
+        '  box-shadow:inset 0 -1px 0 rgba(255,255,255,0.04);',
+        '  border-bottom:1px solid rgba(255,255,255,0.05);',
         '  padding:14px 16px;',
         '  display:flex;align-items:center;gap:10px;',
         '  flex-shrink:0;',
@@ -336,25 +354,24 @@
         '.vc-header-dot.vc-connecting{background:#fbbf24;animation:vc-pulse 1s infinite;}',
         '.vc-header-dot.vc-error{background:#f87171;}',
         '.vc-header-title{',
-        '  flex:1;font-size:14px;font-weight:600;color:#fff;',
+        '  flex:1;font-size:14px;font-weight:700;color:#fff;letter-spacing:0.01em;',
         '  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
         '}',
         '.vc-header-subtitle{',
-        '  font-size:10px;color:rgba(255,255,255,0.7);font-weight:400;',
-        '  display:block;margin-top:1px;',
+        '  font-size:10px;color:rgba(255,255,255,0.64);font-weight:500;letter-spacing:0.02em;',
+        '  display:block;margin-top:2px;',
         '}',
         '.vc-header-actions{display:flex;gap:4px;align-items:center;}',
         '.vc-header-btn{',
-        '  background:rgba(255,255,255,0.15);',
-        '  border:none;border-radius:6px;',
+        '  background:rgba(255,255,255,0.10);',
+        '  border:1px solid rgba(255,255,255,0.05);border-radius:8px;',
         '  width:28px;height:28px;',
         '  display:flex;align-items:center;justify-content:center;',
         '  cursor:pointer;color:rgba(255,255,255,0.9);',
         '  font-size:14px;',
-        '  transition:background 0.15s ease;',
+        '  transition:background 0.15s ease,border-color 0.15s ease;',
         '}',
-        '.vc-header-btn:hover{background:rgba(255,255,255,0.28);}',
-
+        '.vc-header-btn:hover{background:rgba(255,255,255,0.16);border-color:rgba(255,255,255,0.10);}',
         /* ── Transcript area ──────────────────────────────────────────────────── */
         '.vc-transcript{',
         '  flex:1;',
@@ -382,25 +399,28 @@
         '}',
         '.vc-msg.vc-user{',
         '  align-self:flex-end;',
-        '  background:var(--vc-accent);',
+        '  background:linear-gradient(180deg, #5f61ef, #4749d8);',
         '  color:#fff;',
+        '  border:1px solid rgba(255,255,255,0.06);',
+        '  box-shadow:0 10px 22px rgba(79,70,229,0.22);',
         '  border-bottom-right-radius:3px;',
         '}',
         '.vc-msg.vc-assistant{',
         '  align-self:flex-start;',
-        '  background:var(--vc-surface);',
+        '  background:linear-gradient(180deg, rgba(15,23,42,0.88), rgba(24,24,27,0.96));',
         '  color:var(--vc-text);',
-        '  border:1px solid var(--vc-border);',
+        '  border:1px solid rgba(255,255,255,0.04);',
+        '  box-shadow:0 10px 20px rgba(0,0,0,0.18);',
         '  border-bottom-left-radius:3px;',
         '}',
         '.vc-msg.vc-system{',
         '  align-self:center;',
-        '  background:transparent;',
-        '  color:var(--vc-text3);',
+        '  background:rgba(255,255,255,0.03);',
+        '  color:#a1a1aa;',
         '  font-size:11px;',
         '  padding:4px 10px;',
         '  border-radius:var(--vc-radius-pill);',
-        '  border:1px solid var(--vc-border);',
+        '  border:1px solid rgba(255,255,255,0.05);',
         '}',
         /* Message timestamp */
         '.vc-msg-time{',
@@ -431,22 +451,23 @@
         /* ── Voice waveform bar (shown while recording) ───────────────────────── */
         '.vc-waveform{',
         '  padding:8px 12px;',
-        '  background:var(--vc-surface3);',
+        '  background:linear-gradient(180deg, rgba(99,102,241,0.06), rgba(39,39,42,0.98));',
         '  border-top:1px solid var(--vc-border);',
-        '  display:none;align-items:center;gap:2px;justify-content:center;',
+        '  display:none;align-items:center;gap:3px;justify-content:center;',
         '  height:44px;flex-shrink:0;',
         '}',
         '.vc-waveform.vc-active{display:flex;}',
         '.vc-waveform-bar{',
-        '  width:3px;',
-        '  background:var(--vc-accent);',
-        '  border-radius:2px;',
+        '  width:4px;',
+        '  background:linear-gradient(180deg, #f5f3ff 0%, #c4b5fd 24%, #8b5cf6 72%, #6366f1 100%);',
+        '  box-shadow:0 0 10px rgba(99,102,241,0.22);',
+        '  border-radius:999px;',
         '  height:8px;',
-        '  animation:vc-typing 1.1s ease-in-out infinite;',
+        '  animation:vc-typing 1.0s ease-in-out infinite;',
         '}',
         '.vc-waveform-bar:nth-child(1){animation-delay:0.0s;height:12px;}',
         '.vc-waveform-bar:nth-child(2){animation-delay:0.1s;height:20px;}',
-        '.vc-waveform-bar:nth-child(3){animation-delay:0.2s;height:28px;}',
+        '.vc-waveform-bar:nth-child(3){animation-delay:0.2s;height:30px;}',
         '.vc-waveform-bar:nth-child(4){animation-delay:0.1s;height:20px;}',
         '.vc-waveform-bar:nth-child(5){animation-delay:0.0s;height:12px;}',
 
@@ -482,6 +503,8 @@
         '  border-radius:var(--vc-radius-sm);',
         '  border:none;',
         '  display:flex;align-items:center;justify-content:center;',
+        '  position:relative;',
+        '  overflow:visible;',
         '  cursor:pointer;',
         '  font-size:16px;',
         '  flex-shrink:0;',
@@ -492,9 +515,14 @@
         '.vc-btn-send:hover{background:var(--vc-accent-dark);}',
         '.vc-btn-send:disabled{background:var(--vc-border2);cursor:not-allowed;}',
         '.vc-btn-mic{background:var(--vc-surface3);color:var(--vc-text2);}',
+        '.vc-btn-mic::before,.vc-btn-mic::after{content:"";position:absolute;border-radius:inherit;pointer-events:none;opacity:0;}',
+        '.vc-btn-mic::before{inset:0;background:linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0));}',
+        '.vc-btn-mic::after{inset:-5px;border:2px solid transparent;}',
         '.vc-btn-mic:hover{background:var(--vc-border);}',
-        '.vc-btn-mic.vc-active{background:#fef2f2;color:#dc2626;}',
-        '.vc-btn-mic.vc-active:hover{background:#fee2e2;}',
+        '.vc-btn-mic.vc-active{background:linear-gradient(180deg,#f8fafc,#dbe4ee);color:#334155;box-shadow:inset 0 1px 0 rgba(255,255,255,0.92),0 0 0 1px rgba(255,255,255,0.7),0 0 0 6px rgba(148,163,184,0.16),0 10px 22px rgba(15,23,42,0.18);animation:vc-recording-pulse 1.2s infinite;}',
+        '.vc-btn-mic.vc-active::before{opacity:1;}',
+        '.vc-btn-mic.vc-active::after{border-color:rgba(226,232,240,0.95);box-shadow:0 0 18px rgba(226,232,240,0.24);animation:vc-mic-ring 1.2s ease-out infinite;opacity:1;}',
+        '.vc-btn-mic.vc-active:hover{background:linear-gradient(180deg,#ffffff,#e2e8f0);}',
 
         /* ── Toast notifications ─────────────────────────────────────────────── */
         '.vc-toast-container{',
@@ -1228,12 +1256,13 @@
                         STATE.currentBubble = null;
                         STATE.currentRole = null;
                         _showTyping(false);
-                        // Also update the header text so it doesn't say "Connecting..."
                         if (msg.status === 'ready') _setStatus('connected');
+                        _setHeaderStatusText('ready');
                         _flushPendingContextUpdate();
 
                     } else if (msg.status === 'thinking') {
                         STATE.aiTurnActive = true;
+                        _setHeaderStatusText('responding');
                         _showTyping(true);
                     }
                     break;
@@ -1269,6 +1298,13 @@
         return _wsSend(JSON.stringify(obj));
     }
 
+    /** Update only header subtitle text, without changing dot color/state */
+    function _setHeaderStatusText(keyOrText) {
+        var text = document.getElementById('vc-status-text');
+        if (!text) return;
+        text.textContent = _i18n(keyOrText);
+    }
+
     /** Update connection status dot + subtitle text */
     function _setStatus(status) {
         STATE.wsStatus = status;
@@ -1284,7 +1320,7 @@
             disconnected: _i18n('disconnected'),
             error: _i18n('error'),
         };
-        text.textContent = labels[status] || status;
+        text.textContent = labels[status] || _i18n(status) || status;
 
         /* Update FAB appearance */
         var fab = document.getElementById('vc-fab');
@@ -1351,12 +1387,14 @@
         /* Show typing indicator while Gemini is speaking */
         if (!STATE.aiSpeaking) {
             STATE.aiSpeaking = true;
+            _setHeaderStatusText('speaking');
             _showTyping(true);
         }
         /* Clear speaking flag a moment after the last chunk finishes */
         clearTimeout(STATE._speakingTimer);
         STATE._speakingTimer = setTimeout(function () {
             STATE.aiSpeaking = false;
+            _setHeaderStatusText('ready');
             _showTyping(false);
             _flushPendingContextUpdate();
         }, (STATE.nextPlayAt - ctx.currentTime) * 1000 + 300);
@@ -1417,6 +1455,7 @@
             _showToast(_i18n('connectFirst'), 'warning');
             return;
         }
+        _setHeaderStatusText('listening');
         _closeModal();
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             _showToast('Microphone not supported in this browser.', 'error');
@@ -1477,6 +1516,7 @@
         }
         STATE.micWorklet = null;
         STATE.isRecording = false;
+        _setHeaderStatusText('ready');
         _updateMicUI(false);
     }
 
@@ -1517,7 +1557,33 @@
         /* If same speaker, append text to current bubble. Otherwise, create new bubble. */
         if (STATE.currentBubble && STATE.currentRole === role) {
             var contentSpan = STATE.currentBubble.querySelector('.vc-msg-content');
-            if (contentSpan) contentSpan.textContent += text;
+            if (contentSpan) {
+                var existing = contentSpan.textContent || '';
+                var incoming = String(text);
+
+                if (incoming !== existing) {
+                    if (incoming.indexOf(existing) === 0) {
+                        // Server sent cumulative text: replace with newest full buffer.
+                        contentSpan.textContent = incoming;
+                    } else if (existing.indexOf(incoming) === 0) {
+                        // Older partial chunk arrived late: ignore it.
+                    } else {
+                        // Fallback: append only the non-overlapping suffix.
+                        var overlap = 0;
+                        var maxOverlap = Math.min(existing.length, incoming.length);
+                        for (var i = maxOverlap; i > 0; i--) {
+                            if (existing.slice(-i) === incoming.slice(0, i)) {
+                                overlap = i;
+                                break;
+                            }
+                        }
+                        contentSpan.textContent = _mergeTranscriptSuffix(
+                            existing,
+                            incoming.slice(overlap)
+                        );
+                    }
+                }
+            }
             _scrollToBottom();
         } else {
             STATE.currentBubble = _addBubble(role, text);
@@ -1530,6 +1596,23 @@
         }, 50);
 
         STATE.turnIndex++;
+    }
+
+    function _mergeTranscriptSuffix(existing, suffix) {
+        var left = String(existing || '');
+        var right = String(suffix || '');
+        if (!left) return right;
+        if (!right) return left;
+
+        var lastChar = left.slice(-1);
+        var firstChar = right.charAt(0);
+        var needsSpace =
+            !/\s/.test(lastChar) &&
+            !/\s/.test(firstChar) &&
+            /[A-Za-z0-9]/.test(lastChar) &&
+            /[A-Za-z0-9]/.test(firstChar);
+
+        return left + (needsSpace ? ' ' : '') + right;
     }
 
     /**
@@ -3081,6 +3164,10 @@ function _doApplyFilter(filterType, filterValue, label) {
             connected: 'Connected — speak or type',
             connecting: 'Connecting…',
             disconnected: 'Disconnected',
+            listening: 'Listening…',
+            responding: 'Responding…',
+            speaking: 'Speaking…',
+            ready: 'Ready',
             reconnecting: 'Reconnecting…',
             error: 'Connection error',
             chatCleared: 'Chat cleared',
@@ -3093,6 +3180,10 @@ function _doApplyFilter(filterType, filterValue, label) {
             connected: 'متصل — تحدث أو اكتب',
             connecting: 'جارٍ الاتصال…',
             disconnected: 'غير متصل',
+            listening: 'أستمع الآن…',
+            responding: 'أجهّز الرد…',
+            speaking: 'أتحدث الآن…',
+            ready: 'جاهز',
             reconnecting: 'إعادة الاتصال…',
             error: 'خطأ في الاتصال',
             chatCleared: 'تم مسح المحادثة',
@@ -3105,6 +3196,10 @@ function _doApplyFilter(filterType, filterValue, label) {
             connected: 'Connecté — parlez ou écrivez',
             connecting: 'Connexion…',
             disconnected: 'Déconnecté',
+            listening: 'J\'écoute…',
+            responding: 'Je prépare la réponse…',
+            speaking: 'Je parle…',
+            ready: 'Prêt',
             reconnecting: 'Reconnexion…',
             error: 'Erreur de connexion',
             chatCleared: 'Conversation effacée',
