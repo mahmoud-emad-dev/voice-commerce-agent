@@ -283,9 +283,11 @@
         '.vc-fab.vc-fab--recording::after{inset:-10px;border-width:5px;border-color:rgba(248,113,113,0.72);box-shadow:0 0 18px rgba(220,38,38,0.18);animation:vc-mic-ring 1.15s ease-out 0.28s infinite;opacity:1;}',
         '.vc-fab.vc-fab--connecting{animation:vc-spin 1s linear infinite;}',
 
-        /* Position variants */
+        /* Position variants — overridden by JS drag; these are the CSS fallbacks */
         '.vc-root.vc-pos-bottom-right .vc-fab{bottom:24px;right:24px;}',
         '.vc-root.vc-pos-bottom-left  .vc-fab{bottom:24px;left:24px;}',
+        /* Drag cursor */
+        '.vc-fab.vc-dragging{cursor:grabbing!important;transform:scale(1.10)!important;}',
 
         /* FAB icon */
         '.vc-fab-icon{transition:transform 0.22s ease,opacity 0.18s ease;display:flex;}',
@@ -331,7 +333,7 @@
         '  transform:translateY(0) scale(1);',
         '}',
 
-        /* Panel position variants */
+        /* Panel position variants — right/left overridden by JS when FAB is dragged */
         '.vc-root.vc-pos-bottom-right .vc-panel{bottom:92px;right:24px;}',
         '.vc-root.vc-pos-bottom-left  .vc-panel{bottom:92px;left:24px;}',
 
@@ -3033,6 +3035,156 @@ function _doApplyFilter(filterType, filterValue, label) {
         });
     }
 
+    /* ══════════════════════════════════════════════════════════════════════════
+     * DRAG-ALONG-BOTTOM — FAB + Panel
+     * Lets the user drag the FAB horizontally along the bottom edge.
+     * The panel always opens directly above the FAB's current position.
+     * Position is stored in localStorage so it survives page reloads.
+     * ══════════════════════════════════════════════════════════════════════════ */
+
+    var DRAG_STORAGE_KEY = 'vc_fab_pos';
+    var FAB_BOTTOM = 24;         // px from bottom
+    var FAB_SIZE   = 56;         // px (matches CSS width/height)
+    var PANEL_W    = 330;        // px panel width (matches CSS)
+    var PANEL_GAP  = 12;         // px gap between FAB top and panel bottom
+
+    /** Returns saved { right } offset (pixels from right edge) or null */
+    function _loadDragPos() {
+        try {
+            var raw = localStorage.getItem(DRAG_STORAGE_KEY);
+            if (raw) return JSON.parse(raw);
+        } catch (e) {}
+        return null;
+    }
+
+    /** Save current FAB right-offset (px from right) */
+    function _saveDragPos(rightPx) {
+        try { localStorage.setItem(DRAG_STORAGE_KEY, JSON.stringify({ right: rightPx })); } catch (e) {}
+    }
+
+    /**
+     * Position FAB at `rightPx` pixels from the right edge,
+     * then move the panel so it sits directly above the FAB.
+     */
+    function _applyDragPos(rightPx) {
+        var vw = window.innerWidth;
+        // Clamp: keep FAB fully inside viewport
+        var minRight = 8;
+        var maxRight = vw - FAB_SIZE - 8;
+        rightPx = Math.max(minRight, Math.min(maxRight, rightPx));
+
+        var fab   = document.getElementById('vc-fab');
+        var panel = document.getElementById('vc-panel');
+
+        if (fab) {
+            fab.style.position  = 'fixed';
+            fab.style.bottom    = FAB_BOTTOM + 'px';
+            fab.style.right     = rightPx + 'px';
+            fab.style.left      = '';
+        }
+
+        if (panel) {
+            // Panel bottom = FAB bottom + FAB height + gap
+            var panelBottom = FAB_BOTTOM + FAB_SIZE + PANEL_GAP;
+            panel.style.position = 'fixed';
+            panel.style.bottom   = panelBottom + 'px';
+            panel.style.left     = '';
+
+            // Align panel right edge with FAB right edge, but clamp to stay inside viewport
+            var panelRight = rightPx - Math.max(0, PANEL_W - FAB_SIZE);
+            panelRight = Math.max(8, Math.min(vw - PANEL_W - 8, panelRight));
+            panel.style.right    = panelRight + 'px';
+        }
+
+        return rightPx;
+    }
+
+    function _initDrag() {
+        var fab = document.getElementById('vc-fab');
+        if (!fab) return;
+
+        // ── Apply saved position (or default) ──
+        var saved = _loadDragPos();
+        var currentRight = saved ? saved.right : 24;
+        currentRight = _applyDragPos(currentRight);
+
+        // ── Drag state ──
+        var dragging   = false;
+        var startX     = 0;       // pointer X at drag start
+        var startRight = 0;       // FAB right at drag start
+        var hasMoved   = false;   // true once pointer travels > threshold
+        var DRAG_THRESHOLD = 6;   // px before we consider it a drag
+
+        // ── Pointer down ──
+        function onPointerDown(e) {
+            // Only main button / touch
+            if (e.type === 'mousedown' && e.button !== 0) return;
+            dragging   = true;
+            hasMoved   = false;
+            startX     = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+            startRight = currentRight;
+            fab.setPointerCapture && fab.setPointerCapture(e.pointerId);
+        }
+
+        // ── Pointer move ──
+        function onPointerMove(e) {
+            if (!dragging) return;
+            var clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+            var dx = clientX - startX;
+            if (Math.abs(dx) > DRAG_THRESHOLD) {
+                hasMoved = true;
+                fab.classList.add('vc-dragging');
+                // Moving right means decreasing right offset, and vice-versa
+                currentRight = _applyDragPos(startRight - dx);
+            }
+        }
+
+        // ── Pointer up ──
+        function onPointerUp(e) {
+            if (!dragging) return;
+            dragging = false;
+            fab.classList.remove('vc-dragging');
+            if (hasMoved) {
+                _saveDragPos(currentRight);
+                // Prevent the click event that fires after mouseup from toggling the panel
+                fab._suppressNextClick = true;
+            }
+        }
+
+        // Suppress click when it was a drag, not a tap
+        fab.addEventListener('click', function (e) {
+            if (fab._suppressNextClick) {
+                fab._suppressNextClick = false;
+                e.stopImmediatePropagation();
+            }
+        }, true);
+
+        // ── Use Pointer Events if available, else Mouse + Touch ──
+        if (window.PointerEvent) {
+            fab.addEventListener('pointerdown', function (e) {
+                onPointerDown(e);
+            });
+            window.addEventListener('pointermove', function (e) {
+                onPointerMove(e);
+            });
+            window.addEventListener('pointerup', function (e) {
+                onPointerUp(e);
+            });
+        } else {
+            fab.addEventListener('mousedown',  onPointerDown);
+            window.addEventListener('mousemove', onPointerMove);
+            window.addEventListener('mouseup',   onPointerUp);
+            fab.addEventListener('touchstart', onPointerDown, { passive: true });
+            window.addEventListener('touchmove', onPointerMove, { passive: true });
+            window.addEventListener('touchend',  onPointerUp);
+        }
+
+        // ── Re-clamp on window resize ──
+        window.addEventListener('resize', function () {
+            currentRight = _applyDragPos(currentRight);
+        });
+    }
+
     function _onSendClick() {
         var input = document.getElementById('vc-input');
         var text = input ? input.value.trim() : '';
@@ -3051,7 +3203,7 @@ function _doApplyFilter(filterType, filterValue, label) {
         if (input) { input.value = ''; input.style.height = 'auto'; input.focus(); }
     }
 
-    /* ── Panel open/close ───────────────────────────────────────────────────── */
+    /* -- Panel open/close */
 
     function _togglePanel() {
         if (STATE.panelOpen) _closePanel();
@@ -3272,6 +3424,7 @@ function _doApplyFilter(filterType, filterValue, label) {
         _injectCSS();
         _injectHTML();
         _wireEvents();
+        _initDrag();   // drag-along-bottom for FAB + panel
 
         /* console.log('[VoiceCommerce] widget loaded. Server:', CONFIG.wsUrl, 'Tenant:', CONFIG.tenant); */
     }

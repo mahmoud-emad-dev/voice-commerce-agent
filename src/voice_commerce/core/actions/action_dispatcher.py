@@ -48,12 +48,12 @@ def _infer_sort_action(tool_name: str, tool_args: dict[str, Any]) -> BrowserActi
 
     if any(
         token in normalized
-        for token in ("cheapest", "lowest price", "low price", "price low", "under $", "budget")
+        for token in ("cheapest", "lowest price", "low price", "price low", "budget")
     ):
         return apply_sort("price_asc", "Sorted: Lowest price")
     if any(
         token in normalized
-        for token in ("most expensive", "highest price", "premium", "luxury", "price high")
+        for token in ("most expensive", "highest price", "premium","under $", "luxury", "price high")
     ):
         return apply_sort("price_desc", "Sorted: Highest price")
     if any(token in normalized for token in ("alphabetical", "a to z", "by name", "name order")):
