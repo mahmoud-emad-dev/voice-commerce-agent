@@ -1408,14 +1408,14 @@
     .checkout-overlay {
       position: fixed;
       inset: 0;
-      /* Must sit above the floating voice widget, which uses a near-max z-index. */
-      z-index: 2147483646;
+      /* Adjusted to sit below the FAB (which is 2147483600) but above everything else */
+      z-index: 2147483500;
       background: rgba(14, 13, 11, 0.7);
       display: none;
       align-items: center;
       justify-content: center;
       padding: 24px;
-      backdrop-filter: blur(6px);
+      backdrop-filter: blur(8px);
     }
 
     .checkout-overlay.open {
@@ -1424,16 +1424,22 @@
 
     .checkout-box {
       background: var(--c-surface);
-      border-radius: var(--r-lg);
+      border-radius: 28px;
       width: 100%;
-      max-width: 760px;
+      max-width: 860px;
       max-height: 90vh;
       overflow-y: auto;
-      padding: 24px;
+      padding: 36px;
       position: relative;
-      box-shadow: 0 28px 96px rgba(0, 0, 0, 0.38);
+      box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.08), 0 32px 96px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       animation: slideUp 0.3s cubic-bezier(.34, 1.56, .64, 1);
     }
+
+    .checkout-box::-webkit-scrollbar { width: 8px; }
+    .checkout-box::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.03); border-radius: 8px; margin: 12px; }
+    .checkout-box::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.15); border-radius: 8px; border: 2px solid var(--c-surface); }
+    .checkout-box::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
 
     .checkout-title {
       font-family: var(--f-display);
@@ -1677,23 +1683,59 @@
     .checkout-line-items {
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      max-height: 188px;
+      gap: 10px;
+      max-height: 240px;
       overflow-y: auto;
-      padding-right: 4px;
+      padding-right: 6px;
     }
+
+    .checkout-line-items::-webkit-scrollbar { width: 6px; }
+    .checkout-line-items::-webkit-scrollbar-track { background: transparent; }
+    .checkout-line-items::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 4px; }
 
     .checkout-line-item {
       display: flex;
       justify-content: space-between;
-      gap: 16px;
-      align-items: baseline;
+      gap: 12px;
+      align-items: center;
       font-size: 13.5px;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(17, 24, 39, 0.02);
+      border: 1px solid rgba(17, 24, 39, 0.05);
+      transition: background 0.2s, transform 0.2s;
     }
 
-    .checkout-line-item strong {
+    .checkout-line-item:hover {
+      background: rgba(17, 24, 39, 0.04);
+      transform: translateY(-1px);
+    }
+
+    .checkout-line-item-img {
+      width: 52px;
+      height: 52px;
+      object-fit: cover;
+      border-radius: 10px;
+      background: #fff;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .checkout-line-item-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .checkout-line-item-info strong {
       color: var(--c-ink);
       font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .checkout-line-item-info span {
+      color: var(--c-ink3);
+      font-size: 12.5px;
     }
 
     .checkout-card-title {
@@ -1749,21 +1791,29 @@
       color: var(--c-ink);
       line-height: 1.45;
       min-height: 1.45em;
+      transition: all 0.3s ease;
     }
 
     .checkout-profile-value.is-animating {
-      animation: checkoutFillPulse 0.9s ease;
+      animation: checkoutAIFill 1.2s ease-out forwards;
     }
 
-    @keyframes checkoutFillPulse {
+    @keyframes checkoutAIFill {
       0% {
-        opacity: 0.2;
-        transform: translateY(4px);
+        opacity: 0;
+        background: rgba(99, 102, 241, 0.2);
+        color: var(--c-accent);
+        transform: translateX(-4px);
       }
-
-      100% {
+      30% {
         opacity: 1;
-        transform: translateY(0);
+        background: rgba(99, 102, 241, 0.1);
+        color: var(--c-accent);
+        transform: translateX(0);
+      }
+      100% {
+        background: transparent;
+        color: var(--c-ink);
       }
     }
 
@@ -1795,7 +1845,15 @@
 
     .checkout-choice.is-selected {
       border-color: var(--c-accent);
-      box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.12);
+      box-shadow: 0 0 0 4px rgba(26, 86, 219, 0.15), 0 8px 24px rgba(26, 86, 219, 0.12);
+      animation: checkoutSelectPulse 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      background: linear-gradient(135deg, #ffffff, #f0f7ff);
+    }
+
+    @keyframes checkoutSelectPulse {
+      0% { box-shadow: 0 0 0 0 rgba(26, 86, 219, 0.5); transform: scale(0.97); }
+      50% { box-shadow: 0 0 0 10px rgba(26, 86, 219, 0); transform: scale(1.02); }
+      100% { box-shadow: 0 0 0 4px rgba(26, 86, 219, 0.15), 0 8px 24px rgba(26, 86, 219, 0.12); transform: scale(1); }
     }
 
     .checkout-choice-main strong {
@@ -3229,12 +3287,19 @@
     }
 
     function renderCheckoutLineItems(items) {
-      return (items || []).map(item => `
+      return (items || []).map(item => {
+        const prod = PRODUCTS.find(p => p.id === item.product_id) || {};
+        const img = prod.img || 'https://via.placeholder.com/64x80/f2efe9/888?text=IMG';
+        return `
         <div class="checkout-line-item">
-          <span><strong>${esc(item.name)}</strong> × ${Number(item.quantity || 0)}</span>
-          <span>${formatMoney(item.subtotal)}</span>
+          <img src="${img}" alt="${esc(item.name)}" class="checkout-line-item-img" />
+          <div class="checkout-line-item-info">
+            <strong>${esc(item.name)}</strong>
+            <span>Qty: ${Number(item.quantity || 0)}</span>
+          </div>
+          <div style="font-weight:700; color:var(--c-ink);">${formatMoney(item.subtotal)}</div>
         </div>
-      `).join('');
+      `}).join('');
     }
 
     function renderCheckoutSummary(totals) {
