@@ -445,6 +445,14 @@ class RagService:
         scored.sort(key=lambda item: (-item[0], item[1].price, item[1].name.lower(), item[1].id))
         return [product for _, product in scored]
 
+    @staticmethod
+    def _sort_products_by_price(products: list[Product]) -> list[Product]:
+        """Sort retrieved products by descending price before response formatting."""
+        return sorted(
+            products,
+            key=lambda product: (-product.price, product.name.lower(), product.id),
+        )
+
     def search_category_summaries(
         self, keyword: str | None = None
     ) -> list[tuple[str, CategorySummaryEntry]]:
@@ -623,14 +631,15 @@ class RagService:
             )
             if category_results:
                 reranked_category_results = self._rerank_products_for_query(query, category_results)
+                sorted_results = self._sort_products_by_price(reranked_category_results[:limit])
                 log.info(
                     "rag_search_category_browse_applied",
                     query=query[:80],
                     category=strict_category,
                     available=len(category_results),
-                    returned=min(limit, len(reranked_category_results)),
+                    returned=len(sorted_results),
                 )
-                return reranked_category_results[:limit]
+                return sorted_results
 
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
         loop = asyncio.get_running_loop()
@@ -679,7 +688,7 @@ class RagService:
                 search_results = constrained_results
 
         reranked_results = self._rerank_products_for_query(query, search_results)
-        return reranked_results[:limit]
+        return self._sort_products_by_price(reranked_results[:limit])
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
