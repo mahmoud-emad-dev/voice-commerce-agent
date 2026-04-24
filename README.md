@@ -7,6 +7,12 @@ The project is structured as a full voice-commerce system: a widget captures use
 ## Preview
 
 <p align="center">
+  <img src="docs/demo/Demo%20Gif%201.gif" alt="Voice Commerce Agent live demo showing the storefront and voice assistant flow" width="100%" />
+</p>
+
+<p align="center"><em>Live demo: voice-guided shopping flow in the storefront widget.</em></p>
+
+<p align="center">
   <img src="docs/demo/Screenshot%201.png" alt="Voice Commerce Agent storefront with the voice widget open" width="100%" />
 </p>
 
