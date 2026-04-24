@@ -45,7 +45,7 @@ These screenshots capture the main user journey: greet the shopper, find product
 - WebSocket session handling for low-latency storefront conversations
 - Tool calling for product search, cart actions, and checkout flow
 - Semantic product retrieval with sentence-transformers and Qdrant
-- Browser actions for highlights, cart updates, and checkout rendering
+- Browser actions for filters & sorts, navigation, highlights, cart updates, and checkout rendering
 - Embeddable widget for storefront integration
 - Local storefront page for testing and recording flows
 
