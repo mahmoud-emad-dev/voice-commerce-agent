@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # =========================================================================
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-    gemini_voice_name: str = "Charon"
+    # gemini_voice_name: str = "Charon"
+    gemini_voice_name: str = "Puck"
 
     @property
     def is_gemini_configured(self) -> bool:

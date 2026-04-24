@@ -132,16 +132,12 @@ class VoiceWebSocketHandler:
         if not suffix:
             return left
 
-        last_char = left[-1]
-        first_char = suffix[0]
-        needs_space = (
-            not last_char.isspace()
-            and not first_char.isspace()
-            and last_char.isalnum()
-            and first_char.isalnum()
-        )
-
-        return left + (" " if needs_space else "") + suffix
+        # Do NOT inject spaces between alphanumeric chunks. Gemini's streaming
+        # transcription often splits a single word across deltas (e.g. "loo"
+        # then "king"); it emits a leading space itself when a new word starts.
+        # Adding our own space here produced artifacts like "loo king",
+        # "holi day", "7 0".
+        return left + suffix
 
     async def _wait_for_gemini_connected(
         self, gemini: GeminiLiveHandler, timeout_s: float = 2.5

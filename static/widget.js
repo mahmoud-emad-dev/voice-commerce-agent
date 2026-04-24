@@ -1606,15 +1606,10 @@
         if (!left) return right;
         if (!right) return left;
 
-        var lastChar = left.slice(-1);
-        var firstChar = right.charAt(0);
-        var needsSpace =
-            !/\s/.test(lastChar) &&
-            !/\s/.test(firstChar) &&
-            /[A-Za-z0-9]/.test(lastChar) &&
-            /[A-Za-z0-9]/.test(firstChar);
-
-        return left + (needsSpace ? ' ' : '') + right;
+        // Don't inject spaces between alphanumeric chunks — Gemini's streaming
+        // ASR frequently splits a single word across deltas (e.g. "loo" + "king"),
+        // and manufacturing a space here turns "looking" into "loo king".
+        return left + right;
     }
 
     /**
