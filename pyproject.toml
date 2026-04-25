@@ -35,6 +35,9 @@ packages = ["src/voice_commerce"]
 asyncio_mode = "auto"
 testpaths    = ["tests"]
 pythonpath   = ["src"]
+markers = [
+    "integration: tests that hit real external services",
+]
 
 
 [tool.ruff]
