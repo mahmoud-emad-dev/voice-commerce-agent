@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 import random
 import string
+from datetime import datetime
 from typing import Literal
 
 import structlog
@@ -220,7 +220,8 @@ async def set_checkout_option(
         set_checkout(state)
         return ToolResponse.success(
             ai_text=(
-                f"{_shipping_summary(state.shipping)} is set. For payment, would you like card or PayPal?"
+                f"{_shipping_summary(state.shipping)} is set. "
+                "For payment, would you like card or PayPal?"
             ),
             data=_serialize_state(state),
         )
@@ -235,7 +236,8 @@ async def set_checkout_option(
     set_checkout(state)
     return ToolResponse.success(
         ai_text=(
-            f"Great. Your demo total is ${state.totals['total']:.2f} with {_payment_summary(state.payment)}. "
+            f"Great. Your demo total is ${state.totals['total']:.2f} "
+            f"with {_payment_summary(state.payment)}. "
             'Say "place order" to confirm.'
         ),
         data=_serialize_state(state),

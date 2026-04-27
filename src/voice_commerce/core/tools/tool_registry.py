@@ -1,10 +1,5 @@
-from typing import Any
 
 from google.genai import types
-
-
-
-
 
 # -----------------------------------------------------------------------------
 # PRODUCT TOOLS
@@ -15,16 +10,21 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
         types.FunctionDeclaration(
             name="search_products",
             description=(
-                "Search the store's product catalog using natural language and return actual product matches. "
-                "Use this when the customer wants products, options, recommendations, or more items in a product type. "
+                "Search the store's product catalog using natural language "
+                "and return actual product matches. "
+                "Use this when the customer wants products, options, "
+                "recommendations, or more items in a product type. "
                 "This includes requests like 'show me shorts', 'more shorts', 'summer clothing', "
                 "'light jackets', or 'find me something under $50'. "
-                "When the customer clearly names a product type or known category, normalize it to the store's category "
-                "and include the category field. Examples: shirts/t-shirts/tees -> category='Tees', "
+                "When the customer clearly names a product type or known category, "
+                "normalize it to the store's category and include the category field. "
+                "Examples: shirts/t-shirts/tees -> category='Tees', "
                 "jackets -> category='Jackets', hoodies -> category='Hoodies & Sweatshirts'. "
-                "For pagination, if the user says 'show me more', 'what else', or 'anything else', "
-                "call this again with the same query and set offset to previous_offset + previous_limit. "
-                "Use this instead of search_categories when the user wants actual products, not just category names. "
+                "For pagination, if the user says 'show me more', 'what else', or "
+                "'anything else', call this again with the same query and set offset "
+                "to previous_offset + previous_limit. "
+                "Use this instead of search_categories when the user wants actual products, "
+                "not just category names. "
                 "Do not call this for filler, partial, or ambiguous voice utterances such as "
                 "'what about', 'okay', '.', 'yes', or unfinished speech. "
                 "If the request is unclear, ask a short clarification question first."
@@ -43,7 +43,8 @@ SEARCH_PRODUCTS_TOOL = types.Tool(
                     "category": types.Schema(
                         type=types.Type.STRING,
                         description=(
-                            "Optional normalized store category name when the user's intent clearly matches one. "
+                            "Optional normalized store category name when the user's intent "
+                            "clearly matches one. "
                             "Examples: 'Tees', 'Jackets', 'Shorts', 'Pants', 'Bags'."
                         ),
                     ),
@@ -161,8 +162,10 @@ ADD_TO_CART_TOOL = types.Tool(
             name="add_to_cart",
             description=(
                 "Add a product to the customer's shopping cart. "
-                "Only call this after the customer clearly confirms they want this specific product. "
-                "product_id MUST be the exact integer ID returned by search_products or get_product_details. "
+                "Only call this after the customer clearly confirms they want "
+                "this specific product. "
+                "product_id MUST be the exact integer ID returned by search_products "
+                "or get_product_details. "
                 "Never guess, invent, or derive a product_id from the product name. "
                 "If you do not have a confirmed integer product_id, call search_products first. "
                 "Example: user says 'add the first one' after search returned id=47 -> "
@@ -240,7 +243,8 @@ BEGIN_CHECKOUT_TOOL = types.Tool(
             name="begin_checkout",
             description=(
                 "Start the demo checkout flow for the current cart. "
-                "Call this when the customer asks to check out, buy now, purchase, or place an order. "
+                "Call this when the customer asks to check out, buy now, purchase, "
+                "or place an order. "
                 "If the cart is empty, this returns an error and checkout should not continue."
             ),
             parameters=types.Schema(
@@ -287,7 +291,8 @@ CONFIRM_CHECKOUT_TOOL = types.Tool(
             name="confirm_checkout",
             description=(
                 "Finalize the demo checkout after both shipping and payment are already chosen. "
-                "Only call this after the user explicitly says place order, confirm, go ahead, or another clear final confirmation."
+                "Only call this after the user explicitly says place order, confirm, "
+                "go ahead, or another clear final confirmation."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
@@ -302,7 +307,8 @@ CANCEL_CHECKOUT_TOOL = types.Tool(
         types.FunctionDeclaration(
             name="cancel_checkout",
             description=(
-                "Cancel the active demo checkout if the customer changes their mind or says never mind."
+                "Cancel the active demo checkout if the customer changes their mind "
+                "or says never mind."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,

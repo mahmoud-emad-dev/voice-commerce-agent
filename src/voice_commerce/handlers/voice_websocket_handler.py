@@ -14,16 +14,17 @@ import asyncio
 import json
 import re
 import time
+from contextlib import suppress
 from typing import Any
 
 import structlog
 from fastapi import WebSocket, WebSocketDisconnect
 
 from voice_commerce.config.settings import settings
-from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
-from voice_commerce.core.voice import audio_processor
-from voice_commerce.core.tools import tool_dispatcher, cart_tools, checkout_tools
 from voice_commerce.core.actions.action_dispatcher import ActionDispatcher
+from voice_commerce.core.tools import cart_tools, checkout_tools, tool_dispatcher
+from voice_commerce.core.voice import audio_processor
+from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
 
 log = structlog.get_logger(__name__)
 
@@ -220,7 +221,7 @@ class VoiceWebSocketHandler:
         The main entry point for a WebSocket connection.
         Sets up the configs of the WebSocket, opens Gemini, and runs the two communication loops.
         """
-        #  ====== Accept the WebSocket connection and save the reference for later use in helper methods.======
+        # Accept the WebSocket and keep it for the helper send methods.
         await websocket.accept()
         self._websocket = websocket
 
@@ -275,7 +276,8 @@ class VoiceWebSocketHandler:
                             log.info("triggering_proactive_greeting", session_id=self.session_id)
                             await gemini.send_text(
                                 "--- SYSTEM: The user just connected to the store. "
-                                "Greet them warmly in one short sentence and ask what they are looking for today. ---"
+                                "Greet them warmly in one short sentence and ask what they "
+                                "are looking for today. ---"
                             )
                         except asyncio.CancelledError:
                             log.debug("startup_greeting_cancelled", session_id=self.session_id)
@@ -300,7 +302,7 @@ class VoiceWebSocketHandler:
                         name=f"startup_greeting:{self.session_id}",
                     )
 
-                # 3 ====== Run the two communication tasks concurrently until one raises an exception (e.g. disconnect) ======
+                # Run both communication tasks until one ends or raises.
                 # gather() runs both loops simultaneously.
                 # return_exceptions=False means if one loop crashes, the other is cancelled cleanly.
                 await asyncio.gather(
@@ -322,30 +324,24 @@ class VoiceWebSocketHandler:
                 error_type=type(exc).__name__,
                 exc_info=True,
             )
-            try:
+            with suppress(Exception):
                 await self._send_error(
                     str(exc)
                 )  # Notify browser of the error so it can show a message instead of hanging.
-            except Exception:
-                pass  # WebSocket is already gone
 
         finally:
             if self._startup_greeting_task is not None and not self._startup_greeting_task.done():
                 self._startup_greeting_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await self._startup_greeting_task
-                except asyncio.CancelledError:
-                    pass
             self._startup_greeting_task = None
             if (
                 self._pending_text_flush_task is not None
                 and not self._pending_text_flush_task.done()
             ):
                 self._pending_text_flush_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await self._pending_text_flush_task
-                except asyncio.CancelledError:
-                    pass
             self._pending_text_flush_task = None
             self._gemini = None
             log.info(
@@ -373,7 +369,6 @@ class VoiceWebSocketHandler:
                 # Browser closed the connection cleanly
                 raise WebSocketDisconnect(code=message.get("code", 1000))
 
-            # log.info("browser_message_received", message_type=message["type"], session_id=self.session_id )
             raw_bytes: bytes | None = message.get("bytes")
             raw_text: str | None = message.get("text")
 
@@ -434,14 +429,18 @@ class VoiceWebSocketHandler:
                             products=parsed.get("products", []),
                         )
 
-                        if parsed.get("announce_to_ai") and parsed.get("product_id"):
-                            if gemini.is_connected:
-                                await gemini.send_text(
-                                    "--- SYSTEM: The user added an item to the cart using the page UI. "
-                                    f"Product ID {parsed.get('product_id')} is already in the cart. "
-                                    "Briefly confirm it in one short sentence. Do not call add_to_cart. "
-                                    "Do not ask whether they want to add it. ---"
-                                )
+                        if (
+                            parsed.get("announce_to_ai")
+                            and parsed.get("product_id")
+                            and gemini.is_connected
+                        ):
+                            await gemini.send_text(
+                                "--- SYSTEM: The user added an item to the cart using the page UI. "
+                                f"Product ID {parsed.get('product_id')} is already in the cart. "
+                                "Briefly confirm it in one short sentence. "
+                                "Do not call add_to_cart. "
+                                "Do not ask whether they want to add it. ---"
+                            )
                         continue
 
                     if isinstance(parsed, dict) and parsed.get("type") == "context_update":
@@ -593,9 +592,7 @@ class VoiceWebSocketHandler:
                 tool_name = event.get("name", "")
                 tool_args = event.get("args", {})
                 call_id = event.get("call_id")
-                # log.info("tool_call_received",  tool=tool_name, session=self.session_id ,call_id = call_id, args =tool_args )
-
-                # 1. Execute the tool and get the result string AS Execute the python tool using our dispatcher (Returns our strict ToolResponse object!)
+                # Execute the Python tool using the dispatcher and get a ToolResponse.
                 context = tool_dispatcher.ToolContext(session_id=self.session_id)
                 tool_response = await tool_dispatcher.execute(tool_name, tool_args, context)
                 log.info(
@@ -615,14 +612,7 @@ class VoiceWebSocketHandler:
                 for action in actions:
                     await self._send_json(action.model_dump())
 
-                # 3. TRAFFIC TO GEMINI AI
-                # Send the result back to Gemini, referencing the call_id so Gemini knows which call this result belongs to
-                # # We format the payload as a dictionary for Gemini
-                # if tool_response.status == "error":
-                #     gemini_payload = {"error": tool_response.ai_text}
-                # else:
-                #     gemini_payload = {"result": tool_response.ai_text}
-                #  temporary we will just send str not dict to gemini as im buildig the send_tool_result to take str nad send str not dict
+                # Send the tool result back to Gemini for this call_id.
                 await gemini.send_tool_result(call_id, tool_name, tool_response.ai_text)
 
             # # ── 6. INTERRUPT ─────────────────────────────────────────────────

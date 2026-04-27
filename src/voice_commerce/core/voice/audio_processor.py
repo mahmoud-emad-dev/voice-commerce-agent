@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 # Gemini Live API output format
 GEMINI_OUTPUT_SAMPLE_RATE: int = 24_000  # Hz — Gemini outputs at 24kHz
 GEMINI_OUTPUT_BIT_DEPTH: int = 16  # bits per sample (s16le)
@@ -10,7 +9,7 @@ GEMINI_OUTPUT_CHANNELS: int = 1  # mono audio
 GEMINI_OUTPUT_BYTES_PER_SAMPLE: int = GEMINI_OUTPUT_BIT_DEPTH // 8  # = 2
 
 # Gemini Live API input format (used in Phase 5 for microphone capture)
-MIC_SAMPLE_RATE: int = 16_000  # Hz — Gemini expects 16kHz input MIC_SAMPLE_RATE: int = 16_000  GEMINI_INPUT_SAMPLE_RATE
+MIC_SAMPLE_RATE: int = 16_000  # Hz — Gemini expects 16kHz microphone input
 GEMINI_INPUT_BIT_DEPTH: int = 16
 GEMINI_INPUT_CHANNELS: int = 1
 
@@ -31,9 +30,7 @@ def is_valid_audio_chunk(data: bytes) -> bool:
     """Return True when the PCM chunk looks aligned to 16-bit samples."""
     if not data:
         return False
-    if len(data) % GEMINI_OUTPUT_BYTES_PER_SAMPLE != 0:
-        return False
-    return True
+    return len(data) % GEMINI_OUTPUT_BYTES_PER_SAMPLE == 0
 
 
 def chunk_duration_ms(chunk: bytes) -> float:

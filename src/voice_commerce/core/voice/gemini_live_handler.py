@@ -16,12 +16,10 @@ from google import genai
 from google.genai import types
 from websockets.exceptions import ConnectionClosed
 
-from voice_commerce.core.tools import tool_registry
-from voice_commerce.core.voice import audio_processor
-from voice_commerce.core.voice import prompts
-from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 from voice_commerce.config.settings import settings
-
+from voice_commerce.core.tools import tool_registry
+from voice_commerce.core.voice import audio_processor, prompts
+from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 
 log = structlog.get_logger(__name__)
 
@@ -186,7 +184,8 @@ class GeminiLiveHandler:
         try:
             await self._session.send_client_content(
                 turns=types.Content(role="user", parts=[types.Part(text=text)]),
-                turn_complete=True,  # turn_complete=True is the key flag that tells Gemini: "The user is done speaking, please respond now."
+                # turn_complete=True tells Gemini the user finished their turn.
+                turn_complete=True,
             )
         except Exception as exc:
             if self._handle_send_exception("send_text", exc):
@@ -296,13 +295,15 @@ class GeminiLiveHandler:
             "VISIBLE PRODUCTS ON SCREEN (Numbered in order):\n"
             f"{product_text}\n"
             "CRITICAL RULES:\n"
-            "- If the user says 'the first one', 'the second one', look at the numbered list above.\n"
-            "- NEVER invent or guess a product ID. If a product is not in the list above, or returned by a tool, say you don't see it.\n"
+            "- If the user says 'the first one' or 'the second one', use the numbered list above.\n"
+            "- NEVER invent or guess a product ID. If a product is not in the list above "
+            "or returned by a tool, say you don't see it.\n"
             "CRITICAL INSTRUCTIONS FOR THIS UPDATE:\n"
             "1. Update your internal memory with this new screen state.\n"
             "2. DO NOT respond to this message with any audio whatsoever.\n"
             "3. Do not say 'Okay', 'Understood', or anything else.\n"
-            "4. Acknowledge this silently by outputting exactly the text '[SILENT_UPDATE]' and nothing else."
+            "4. Acknowledge this silently by outputting exactly the text "
+            "'[SILENT_UPDATE]' and nothing else."
         )
 
         log.info(
@@ -350,11 +351,10 @@ class GeminiLiveHandler:
             while True:
                 saw_message_in_this_receive_call = False
                 response: types.LiveServerMessage
-                is_audio: bool = False
                 async for response in self._session.receive():
                     saw_message_in_this_receive_call = True
 
-                    # ── 1. TOOL CALLS are top-level on Live API responses. ──────────────────────────────────────────
+                    # Tool calls are top-level on Live API responses.
                     if response.tool_call and response.tool_call.function_calls:
                         for function_call in response.tool_call.function_calls:
                             yield {
@@ -391,7 +391,6 @@ class GeminiLiveHandler:
                                 inline_data = getattr(part, "inline_data", None)
                                 if inline_data and inline_data.data:
                                     audio_data = inline_data.data
-                                    is_audio = True
                                     log.debug("Received gemini_audio_chunk", bytes=len(audio_data))
                                     yield {"type": "audio", "data": audio_data}
 
@@ -429,14 +428,14 @@ class GeminiLiveHandler:
                         log.warning("gemini_go_away", time_left=time_left)
                         yield {"type": "go_away", "time_left": time_left}
 
-                    # if not is_audio:
-                    # log.info("Received response from Gemini:", response=str(response)[:])  # log a preview of the raw response for debugging Temp
-
                 # ── 7. DEAD CONNECTION DETECTOR ────────────────────────────────
                 if not saw_message_in_this_receive_call:
                     log.debug(
                         "gemini_receive_no_message",
-                        message="No messages received in this call to session.receive(). This may indicate a silent disconnection or a network issue.",
+                        message=(
+                            "No messages received in this call to session.receive(). "
+                            "This may indicate a silent disconnection or a network issue."
+                        ),
                     )
                     yield {
                         "type": "session_closed",
@@ -480,7 +479,7 @@ class GeminiLiveHandler:
     # =========================================================================
     # LIFECYCLE MANAGEMENT
     # =========================================================================
-    async def __aenter__(self) -> "GeminiLiveHandler":
+    async def __aenter__(self) -> GeminiLiveHandler:
         """Opens the WebSocket to Gemini's servers."""
         log.info("gemini_session_connecting", model=settings.gemini_model)
 
