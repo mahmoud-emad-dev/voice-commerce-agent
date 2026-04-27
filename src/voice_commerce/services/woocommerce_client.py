@@ -57,7 +57,7 @@ class WooCommerceClient:
                 max_connections=10,
             ),
             follow_redirects=True,
-            verify=False,
+            verify=settings.wc_verify_ssl,
         )
 
     # =========================================================================
