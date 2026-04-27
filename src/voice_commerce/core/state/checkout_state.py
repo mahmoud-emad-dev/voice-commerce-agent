@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-
 CheckoutStep = Literal["review", "shipping", "payment", "confirm", "success", "cancelled"]
 ShippingOption = Literal["standard", "express"]
 PaymentOption = Literal["card", "paypal"]

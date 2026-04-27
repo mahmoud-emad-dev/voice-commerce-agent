@@ -27,6 +27,7 @@ where browsers set Origin but expect the header on the response directly.
 Keeping both is correct and not redundant.
 """
 from __future__ import annotations
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

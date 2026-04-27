@@ -7,11 +7,12 @@
 # THIS FILE IN THE ARCHITECTURE: Used by woocommerce_client.py to parse responses, 
 # and by product_tools.py to format data for the Gemini AI.
 # =============================================================================
+
 from __future__ import annotations
+
 import html
 import re
 from typing import Any
-
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -261,20 +262,20 @@ class Product(BaseModel):
             lines.append(f"URL: {self.permalink}")
         return "\n".join(lines)
  
-    def to_tool_response(self , detailed :bool = False) -> dict[str, Any]:
+    def to_tool_response(self, detailed: bool = False) -> dict[str, Any]:
         """
         Return a dictionary representation of the product for tool responses.
         ai_text as for gemini and rest for browser Actions on UI.
         """
         return {
-            "ai_text":  self.to_tool_detail() if detailed else self.to_tool_summary() ,
+            "ai_text": self.to_tool_detail() if detailed else self.to_tool_summary(),
             "data": {
                 "id": self.id,
                 "name": self.name,
                 "display_price": self.display_price,
                 "is_in_stock": self.is_in_stock,
                 "permalink": self.permalink,
-            }
+            },
         }
 
     # =========================================================================
@@ -282,7 +283,7 @@ class Product(BaseModel):
     # =========================================================================
  
     @classmethod
-    def from_woocommerce(cls, data: dict) -> "Product":
+    def from_woocommerce(cls, data: dict) -> Product:
         """
         Parse a raw WooCommerce REST API product dict into a Product model.
  

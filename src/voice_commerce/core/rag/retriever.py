@@ -23,14 +23,12 @@
 
 
 from __future__ import annotations
-from typing import Any
 
 import structlog
 
 from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
-
 
 log = structlog.get_logger()
 

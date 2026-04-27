@@ -1,25 +1,24 @@
 from __future__ import annotations
+
 from typing import Any
 
 import structlog
 
-from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.core.actions.browser_actions import (
     BrowserAction,
-    HighlightProduct,
     ClearHighlights,
     ShowProductModal,
-    SetSearchQuery,
+    add_to_real_cart,
     apply_filter,
     apply_sort,
     close_checkout,
     highlight,
     notify,
+    open_cart,
     render_checkout,
     update_badge,
-    add_to_real_cart,
-    open_cart,
 )
+from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
 

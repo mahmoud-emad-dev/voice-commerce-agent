@@ -31,10 +31,10 @@ class CSVNotFoundError(CSVAPIError):
 # SINGLETON LIFECYCLE (Mimics WooCommerce Client)
 # =============================================================================
 
-_client_instance: "CSVProductClient | None" = None
+_client_instance: CSVProductClient | None = None
 
 
-def get_client() -> "CSVProductClient":
+def get_client() -> CSVProductClient:
     """Return the initialized CSV-backed store client."""
     if _client_instance is None:
         raise RuntimeError("CSVProductClient not initialized.")
@@ -76,7 +76,7 @@ class CSVProductClient:
     def _load_csv(self) -> None:
         """Parse the CSV catalog into validated Product instances."""
         try:
-            with open(self.csv_path, mode="r", encoding="utf-8-sig") as f:
+            with open(self.csv_path, encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     try:

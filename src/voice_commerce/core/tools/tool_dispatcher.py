@@ -1,12 +1,12 @@
 from __future__ import annotations
+
 import asyncio
-from typing import Any
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
-from google.genai import types
 
-from voice_commerce.core.tools import tool_registry , cart_tools, checkout_tools, product_tools
+from voice_commerce.core.tools import cart_tools, checkout_tools, product_tools, tool_registry
 from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
