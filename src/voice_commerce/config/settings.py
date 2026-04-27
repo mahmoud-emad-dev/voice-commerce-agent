@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     wc_consumer_key: str = ""
     wc_consumer_secret: str = ""
     wc_timeout: int = 30
+    wc_verify_ssl: bool = True
 
     @property
     def is_woocommerce_configured(self) -> bool:
