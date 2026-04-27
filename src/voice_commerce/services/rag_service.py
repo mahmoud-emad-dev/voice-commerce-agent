@@ -22,9 +22,9 @@ SINGLETON PATTERN:
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import time
-from typing import Any, TypeAlias, TypedDict
+from collections import Counter
+from typing import Any, TypedDict
 
 import structlog
 
@@ -32,7 +32,6 @@ from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.retriever import Retriever
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
-
 from voice_commerce.services.csv_client import get_client
 
 log = structlog.get_logger()
@@ -65,15 +64,15 @@ class CategorySummaryEntry(TypedDict):
     parent_groups: list[str]
 
 
-CategorySummary: TypeAlias = dict[str, CategorySummaryEntry]
-ProductsByCategory: TypeAlias = dict[str, list[CategoryProductSnapshot]]
-CategoryLookup: TypeAlias = dict[str, str]
+type CategorySummary = dict[str, CategorySummaryEntry]
+type ProductsByCategory = dict[str, list[CategoryProductSnapshot]]
+type CategoryLookup = dict[str, str]
 
 # ── Module-level singleton ────────────────────────────────────────────────────
-_service_instance: "RagService | None" = None
+_service_instance: RagService | None = None
 
 
-def get_rag_service() -> "RagService":
+def get_rag_service() -> RagService:
     """
     Return the global RagService singleton, creating it if needed.
     """

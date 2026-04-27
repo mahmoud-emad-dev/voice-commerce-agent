@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Literal, Union, Annotated
+
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -181,22 +182,20 @@ class ClearHighlights(_ActionBase):
 
 
 BrowserAction = Annotated[
-    Union[
-        HighlightProduct,
-        ScrollToProduct,
-        UpdateCartBadge,
-        AddToRealCart,
-        ShowNotification,
-        OpenCart,
-        CloseCart,
-        RenderCheckout,
-        CloseCheckout,
-        ShowProductModal,
-        SetSearchQuery,
-        ApplyFilter,
-        ApplySort,
-        ClearHighlights,
-    ],
+    HighlightProduct
+    | ScrollToProduct
+    | UpdateCartBadge
+    | AddToRealCart
+    | ShowNotification
+    | OpenCart
+    | CloseCart
+    | RenderCheckout
+    | CloseCheckout
+    | ShowProductModal
+    | SetSearchQuery
+    | ApplyFilter
+    | ApplySort
+    | ClearHighlights,
     Field(discriminator="action"),
 ]
 """

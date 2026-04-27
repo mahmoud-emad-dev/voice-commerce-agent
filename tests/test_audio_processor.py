@@ -11,10 +11,10 @@ from __future__ import annotations
 import struct
 
 from voice_commerce.core.voice.audio_processor import (
-    MIC_SAMPLE_RATE,
     GEMINI_OUTPUT_BYTES_PER_SAMPLE,
     GEMINI_OUTPUT_BYTES_PER_SECOND,
     GEMINI_OUTPUT_SAMPLE_RATE,
+    MIC_SAMPLE_RATE,
     chunk_duration_ms,
     get_browser_audio_config,
     is_valid_audio_chunk,

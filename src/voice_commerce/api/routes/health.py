@@ -12,7 +12,6 @@ from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
 from voice_commerce.services.rag_service import get_rag_service
 
-
 router = APIRouter()
 
 log = structlog.get_logger(__name__)
@@ -44,7 +43,10 @@ class ReadyResponse(BaseModel):
     "/health",
     response_model=HealthResponse,
     summary="Liveness check",
-    description="Returns 200 if the server process is alive. Used by Docker, load balancers, and monitoring.",
+    description=(
+        "Returns 200 if the server process is alive. "
+        "Used by Docker, load balancers, and monitoring."
+    ),
 )
 async def health_check() -> HealthResponse:
     """Return a lightweight process-level liveness response."""
@@ -65,7 +67,10 @@ async def health_check() -> HealthResponse:
     "/ready",
     response_model=ReadyResponse,
     summary="Readiness check",
-    description="Returns 200 if the server is ready to handle requests. Checks dependencies like Gemini API key.",
+    description=(
+        "Returns 200 if the server is ready to handle requests. "
+        "Checks dependencies like Gemini API key."
+    ),
 )
 async def readiness_check(response: Response) -> ReadyResponse:
     """

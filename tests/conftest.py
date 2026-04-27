@@ -6,11 +6,12 @@
 # =================
 
 from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 
-import pytest   
+import pytest
 import pytest_asyncio
-from httpx import AsyncClient ,ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from voice_commerce.main import create_app
 
@@ -33,6 +34,6 @@ async def async_client(app) -> AsyncGenerator[AsyncClient, None]:
     """
     async with AsyncClient(
         transport=ASGITransport(app=app),
-        base_url="http://test",   # base URL — all relative URLs resolve against this
+        base_url="http://test",  # base URL — all relative URLs resolve against this
     ) as client:
         yield client

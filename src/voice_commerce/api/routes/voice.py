@@ -9,10 +9,11 @@
 # ==============================================================================
 
 from __future__ import annotations
+
 import uuid
 
 import structlog
-from fastapi import APIRouter, WebSocket , Query
+from fastapi import APIRouter, Query, WebSocket
 
 from voice_commerce.handlers.voice_websocket_handler import VoiceWebSocketHandler
 

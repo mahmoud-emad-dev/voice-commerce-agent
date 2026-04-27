@@ -1,18 +1,16 @@
 
 
-from __future__ import annotations 
+from __future__ import annotations
 
 import structlog
 from qdrant_client import QdrantClient
-from qdrant_client.models import ( 
+from qdrant_client.models import (
     Distance,
-    VectorParams,
-    PointStruct,
-    Filter,
     FieldCondition,
+    Filter,
+    PointStruct,
     Range,
-    SearchParams,
-    ScoredPoint,
+    VectorParams,
 )
 
 from voice_commerce.config.settings import settings
@@ -84,7 +82,7 @@ class VectorStore:
         assert len(products) == len(vectors), "products and vectors must have equal length"
 
         points = []
-        for product, vector in zip(products, vectors):
+        for product, vector in zip(products, vectors, strict=True):
             points.append(
                 PointStruct(
                     id=product.id, # WooCommerce integer ID

@@ -11,13 +11,14 @@
 
 
 from __future__ import annotations
+
 from typing import Any
 
 import structlog
 
-from voice_commerce.services.csv_client import get_client
-from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.models.cart import Cart, CartItem
+from voice_commerce.models.tool_response import ToolResponse
+from voice_commerce.services.csv_client import get_client
 
 log = structlog.get_logger(__name__)
 

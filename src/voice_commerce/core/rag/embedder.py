@@ -9,7 +9,6 @@ from sentence_transformers import SentenceTransformer
 
 from voice_commerce.config.settings import settings
 
-
 log = structlog.get_logger(__name__)
 
 # Keep vector size available at import time so Qdrant can initialize cheaply.
