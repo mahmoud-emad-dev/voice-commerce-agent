@@ -16,17 +16,19 @@
 # =============================================================================
 
 from __future__ import annotations
+
 import hashlib
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import structlog
+
+from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.services.csv_client import get_client
 from voice_commerce.services.rag_service import (
     CategoryProductSnapshot,
     CategorySummaryEntry,
     get_rag_service,
 )
-from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
 
@@ -109,7 +111,8 @@ async def search_products(
         if not rag.is_ready:
             log.warning("search_attempted_while_rag_syncing")
             return ToolResponse.error(
-                "I am currently updating my catalog database. Please give me a few seconds and try your search again."
+                "I am currently updating my catalog database. "
+                "Please give me a few seconds and try your search again."
             )
         # 1. Resolve cursor state for this session/query.
         session_cache = _ensure_session_cache(session_id)
@@ -325,7 +328,8 @@ async def search_categories(
         resolved_category = rag.resolve_category_name(category)
         if not resolved_category:
             return ToolResponse.error(
-                f"I couldn't find a category called '{category}'. Ask me what categories we carry for the full list."
+                f"I couldn't find a category called '{category}'. "
+                "Ask me what categories we carry for the full list."
             )
 
         total_items: list[CategoryProductSnapshot] = rag.get_products_for_category(
@@ -366,7 +370,8 @@ async def search_categories(
         range_start = safe_offset + 1
         range_end = safe_offset + len(items)
         lines = [
-            f"Found {len(total_items)} products in {resolved_category} (showing {range_start}-{range_end})."
+            f"Found {len(total_items)} products in {resolved_category} "
+            f"(showing {range_start}-{range_end})."
         ]
         if max_price is not None:
             lines.append(f"Price ceiling applied: ${max_price:.2f}.")
