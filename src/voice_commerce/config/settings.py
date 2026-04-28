@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dimension: int = 384
     qdrant_collection: str = "products"
+    qdrant_mode: str = "memory"
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+
+    @property
+    def qdrant_uses_server(self) -> bool:
+        """True when Qdrant should be reached over the network instead of in-memory."""
+        return self.qdrant_mode.strip().lower() == "server"
 
 
 settings = Settings()

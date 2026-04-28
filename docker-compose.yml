@@ -21,6 +21,9 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-products}
+      QDRANT_MODE: ${QDRANT_MODE:-server}
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
     ports:
       - "8000:8000"
     depends_on:
