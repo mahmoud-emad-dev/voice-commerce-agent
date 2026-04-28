@@ -1,0 +1,50 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-native-audio-preview-12-2025}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_DEBUG: ${APP_DEBUG:-true}
+      DEBUG_PAYLOAD_LOGS: ${DEBUG_PAYLOAD_LOGS:-false}
+      ENABLE_PUBLIC_DEMO: ${ENABLE_PUBLIC_DEMO:-false}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["*"]}
+      STORE_NAME: ${STORE_NAME:-NEXFIT}
+      ASSISTANT_NAME: ${ASSISTANT_NAME:-PHOENIX}
+      STORE_TAGLINE: ${STORE_TAGLINE:-Your go-to store for performance sports gear.}
+      WC_STORE_URL: ${WC_STORE_URL:-}
+      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY:-}
+      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET:-}
+      WC_VERIFY_SSL: ${WC_VERIFY_SSL:-true}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-products}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
+      - postgres
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voice_commerce}
+      POSTGRES_USER: ${POSTGRES_USER:-voice_commerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voice_commerce}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  qdrant_data:
+  postgres_data:
