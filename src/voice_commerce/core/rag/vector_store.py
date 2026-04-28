@@ -25,11 +25,30 @@ class VectorStore:
     One instance created at startup in main.py lifespan, stored on app.state.
     """
     def __init__(self) -> None:
-        # ":memory:" creates an in-process Qdrant — no network, no files.
-        self._client = QdrantClient(":memory:")
+        self._client = self._create_client()
         self._collection = settings.qdrant_collection
         self._ensure_collection()
-        log.info("vector_store_ready", collection=self._collection, dim=VECTOR_DIM)
+        log.info(
+            "vector_store_ready",
+            collection=self._collection,
+            dim=VECTOR_DIM,
+            mode=settings.qdrant_mode,
+        )
+
+    @staticmethod
+    def _create_client() -> QdrantClient:
+        """Build the Qdrant client from the current app settings."""
+        if settings.qdrant_uses_server:
+            log.info(
+                "vector_store_connecting_qdrant_server",
+                host=settings.qdrant_host,
+                port=settings.qdrant_port,
+            )
+            return QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+
+        # ":memory:" creates an in-process Qdrant for simple local development.
+        log.info("vector_store_using_in_memory_qdrant")
+        return QdrantClient(":memory:")
 
     def _ensure_collection(self) -> None:
         """
