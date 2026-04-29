@@ -22,9 +22,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from voice_commerce.config.settings import settings
 from voice_commerce.core.actions.action_dispatcher import ActionDispatcher
+from voice_commerce.core.state.checkout_state import export_checkout_state, restore_checkout_state
 from voice_commerce.core.tools import cart_tools, checkout_tools, tool_dispatcher
 from voice_commerce.core.voice import audio_processor
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
+from voice_commerce.services.session_state_store import get_session_state_store
 
 log = structlog.get_logger(__name__)
 
@@ -224,6 +226,7 @@ class VoiceWebSocketHandler:
         # Accept the WebSocket and keep it for the helper send methods.
         await websocket.accept()
         self._websocket = websocket
+        await self._load_persisted_state()
 
         log.info("ws_connected", session_id=self.session_id, client=str(websocket.client))
 
@@ -344,8 +347,69 @@ class VoiceWebSocketHandler:
                     await self._pending_text_flush_task
             self._pending_text_flush_task = None
             self._gemini = None
+            await self._persist_session_state()
             log.info(
                 "ws_handler_finished", session_id=self.session_id, total_turns=len(self._transcript)
+            )
+
+    async def _load_persisted_state(self) -> None:
+        """Restore transcript, resumption handle, cart, and checkout from Postgres."""
+        store = get_session_state_store()
+        if not store.enabled:
+            return
+
+        try:
+            saved_state = await store.load_session(self.session_id)
+        except Exception as exc:
+            log.warning(
+                "session_state_restore_failed",
+                session_id=self.session_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            return
+
+        if not saved_state:
+            return
+
+        GLOBAL_SESSIONS[self.session_id] = list(saved_state.get("transcript", []))
+        self._transcript = GLOBAL_SESSIONS[self.session_id]
+        self._resumption_handle = saved_state.get("resumption_handle")
+        if self._resumption_handle:
+            GLOBAL_HANDLES[self.session_id] = self._resumption_handle
+        else:
+            GLOBAL_HANDLES.pop(self.session_id, None)
+
+        cart_tools.restore_cart_state(self.session_id, saved_state.get("cart"))
+        restore_checkout_state(self.session_id, saved_state.get("checkout"))
+        log.info(
+            "session_state_restored",
+            session_id=self.session_id,
+            transcript_turns=len(self._transcript),
+            has_resumption_handle=bool(self._resumption_handle),
+            cart_items=cart_tools.get_cart(self.session_id).item_count,
+        )
+
+    async def _persist_session_state(self) -> None:
+        """Write the current session snapshot to Postgres when persistence is enabled."""
+        store = get_session_state_store()
+        if not store.enabled:
+            return
+
+        try:
+            await store.save_session(
+                self.session_id,
+                transcript=list(self._transcript),
+                resumption_handle=self._resumption_handle,
+                cart=cart_tools.export_cart_state(self.session_id),
+                checkout=export_checkout_state(self.session_id),
+            )
+        except Exception as exc:
+            log.warning(
+                "session_state_persist_failed",
+                session_id=self.session_id,
+                error=str(exc),
+                exc_info=True,
             )
 
     # =========================================================================
@@ -614,6 +678,7 @@ class VoiceWebSocketHandler:
 
                 # Send the tool result back to Gemini for this call_id.
                 await gemini.send_tool_result(call_id, tool_name, tool_response.ai_text)
+                await self._persist_session_state()
 
             # # ── 6. INTERRUPT ─────────────────────────────────────────────────
             # elif event_type == "interrupted":
@@ -625,9 +690,11 @@ class VoiceWebSocketHandler:
                 handle = event.get("handle")
                 if handle is not None:
                     GLOBAL_HANDLES[self.session_id] = handle
+                    self._resumption_handle = handle
                     log.info(
                         "resumption_handle_received", handle=handle, session_id=self.session_id
                     )
+                    await self._persist_session_state()
                     # Optionally send to frontend so it can be saved
                     # await self._send_json({"type": "resumption_handle", "handle": handle})
 
@@ -636,10 +703,12 @@ class VoiceWebSocketHandler:
                 # One AI response turn finished.
                 # In voice mode: DON'T break — keep looping for the next turn.
                 # Save completed transcript, reset status, re-enable UI.
+                persisted_turn = False
                 if user_transcript_text:
                     full_user_text = user_transcript_text
                     self._transcript.append({"role": "user", "text": full_user_text})
                     user_transcript_text = ""
+                    persisted_turn = True
                     log.debug(
                         "turn_saved user_transcript",
                         length=len(full_user_text),
@@ -650,6 +719,7 @@ class VoiceWebSocketHandler:
                     full_ai_text = ai_transcript_text
                     self._transcript.append({"role": "ai", "text": full_ai_text})
                     ai_transcript_text = ""
+                    persisted_turn = True
                     log.debug(
                         "turn_saved ai_transcript",
                         length=len(full_ai_text),
@@ -663,6 +733,8 @@ class VoiceWebSocketHandler:
                     user_turns=sum(1 for item in self._transcript if item["role"] == "user"),
                     ai_turns=sum(1 for item in self._transcript if item["role"] == "ai"),
                 )
+                if persisted_turn:
+                    await self._persist_session_state()
                 # Tell the browser to unlock the text box and mic button
                 await self._send_status(STATUS_DONE)
 
