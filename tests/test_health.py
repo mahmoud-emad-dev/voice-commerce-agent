@@ -34,6 +34,10 @@ async def test_ready_returns_200_or_503(async_client: AsyncClient) -> None:
         f"Response: {response.text}"
     )
 
+    payload = response.json()
+    assert "checks" in payload
+    assert "session_store" in payload["checks"]
+
 
 # =============================================================================
 # Error handling test

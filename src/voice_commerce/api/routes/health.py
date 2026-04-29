@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
 from voice_commerce.services.rag_service import get_rag_service
+from voice_commerce.services.session_state_store import get_session_state_store
 
 router = APIRouter()
 
@@ -80,11 +81,15 @@ async def readiness_check(response: Response) -> ReadyResponse:
     and the background catalog sync has finished.
     """
     rag = get_rag_service()
+    session_store = get_session_state_store()
     checks: dict[str, str] = {}
 
     checks["gemini_configured"] = "ok" if settings.is_gemini_configured else "missing_api_key"
     checks["embedder"] = "ready" if embedder.is_ready() else "warming_up"
     checks["rag_catalog"] = "ready" if rag.is_ready else "syncing"
+    checks["session_store"] = "ready" if session_store.is_ready else "not_ready"
+    if not settings.postgres_enabled:
+        checks["session_store"] = "disabled"
 
     embedder_error = embedder.last_error()
     if embedder_error:
@@ -93,6 +98,7 @@ async def readiness_check(response: Response) -> ReadyResponse:
         settings.is_gemini_configured
         and embedder.is_ready()
         and rag.is_ready
+        and session_store.is_ready
         and not embedder_error
     )
     readiness_status = "ready" if is_ready else "not_ready"

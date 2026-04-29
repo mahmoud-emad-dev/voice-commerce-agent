@@ -24,6 +24,12 @@ services:
       QDRANT_MODE: ${QDRANT_MODE:-server}
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
       QDRANT_PORT: ${QDRANT_PORT:-6333}
+      POSTGRES_ENABLED: ${POSTGRES_ENABLED:-true}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-voice_commerce}
+      POSTGRES_USER: ${POSTGRES_USER:-voice_commerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voice_commerce}
     ports:
       - "8000:8000"
     depends_on:
@@ -43,6 +49,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-voice_commerce}
       POSTGRES_USER: ${POSTGRES_USER:-voice_commerce}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voice_commerce}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voice_commerce} -d ${POSTGRES_DB:-voice_commerce}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     ports:
       - "5432:5432"
     volumes:

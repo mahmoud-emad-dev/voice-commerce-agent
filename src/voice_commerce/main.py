@@ -16,6 +16,10 @@ from voice_commerce.api.routes import health, voice, widget
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
 from voice_commerce.services.rag_service import get_rag_service
+from voice_commerce.services.session_state_store import (
+    initialize_session_state_store,
+    shutdown_session_state_store,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -100,6 +104,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
 
+    await initialize_session_state_store()
+    log.info("app_startup_session_state_store_initialized", enabled=settings.postgres_enabled)
+
     # Warm the demo catalog in the background so semantic search is ready soon
     # after startup without blocking the server boot sequence.
     get_rag_service()
@@ -113,6 +120,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
 
     await csv_client.shutdown()
     log.info("app_shutdown_csv_store_disconnected")
+
+    await shutdown_session_state_store()
+    log.info("app_shutdown_session_state_store_closed")
 
     log.info("Application  shut down completed")
 

@@ -8,6 +8,5 @@ __pycache__/
 .idea/
 .vscode/
 local/
-README.md
 tests/
 !tests/products.csv
