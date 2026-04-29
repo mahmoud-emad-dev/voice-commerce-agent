@@ -8,6 +8,7 @@ ENV PYTHONUNBUFFERED=1
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
+COPY README.md ./README.md
 COPY src ./src
 COPY static ./static
 COPY tests/products.csv ./tests/products.csv

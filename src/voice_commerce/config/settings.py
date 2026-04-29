@@ -97,5 +97,23 @@ class Settings(BaseSettings):
         """True when Qdrant should be reached over the network instead of in-memory."""
         return self.qdrant_mode.strip().lower() == "server"
 
+    # =========================================================================
+    # SESSION STATE / POSTGRES SETTINGS
+    # =========================================================================
+    postgres_enabled: bool = False
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "voice_commerce"
+    postgres_user: str = "voice_commerce"
+    postgres_password: str = "voice_commerce"
+
+    @property
+    def postgres_dsn(self) -> str:
+        """Build the PostgreSQL DSN used by the session-state store."""
+        return (
+            f"postgresql://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
 
 settings = Settings()

@@ -82,6 +82,23 @@ def clear_cart(session_id: str) -> Cart:
     return cart
 
 
+def export_cart_state(session_id: str) -> dict[str, Any]:
+    """Serialize the current session cart into a JSON-friendly snapshot."""
+    cart = _get_cart(session_id)
+    return cart.model_dump(mode="json")
+
+
+def restore_cart_state(session_id: str, data: dict[str, Any] | None) -> Cart:
+    """Restore one session cart snapshot loaded from persistence."""
+    if not data:
+        _CARTS[session_id] = Cart(session_id=session_id)
+        return _CARTS[session_id]
+
+    restored = Cart.model_validate({**data, "session_id": session_id})
+    _CARTS[session_id] = restored
+    return restored
+
+
 # Tools methods
 
 
