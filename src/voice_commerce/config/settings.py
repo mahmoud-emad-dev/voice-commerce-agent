@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Which domains can make requests to this API. In production, replace the
     # demo wildcard with the real frontend origin.
     cors_allow_origins: list[str] = ["*"]
+    admin_api_key: str = "dev-admin-key"
 
     @property
     def is_public_demo_enabled(self) -> bool:
@@ -114,6 +115,15 @@ class Settings(BaseSettings):
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    # =========================================================================
+    # TENANT SETTINGS
+    # =========================================================================
+    tenant_mode: str = "demo"
+    demo_tenant_id: str = "demo"
+    demo_tenant_name: str = "NEXFIT Demo"
+    demo_tenant_api_key: str = "demo-local-key"
+    demo_tenant_allowed_origins: list[str] = ["*"]
 
 
 settings = Settings()
