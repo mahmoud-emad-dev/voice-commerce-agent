@@ -55,6 +55,11 @@ GLOBAL_HANDLES: dict[str, str] = {}  # Stores Google's resumption handles
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 
 
+def _memory_scope_key(session_id: str, tenant_id: str) -> str:
+    """Keep in-memory transcript and resumption-handle caches isolated per tenant."""
+    return f"{tenant_id}:{session_id}"
+
+
 class VoiceWebSocketHandler:
     """
     Manages one WebSocket session from one browser client.
@@ -70,14 +75,16 @@ class VoiceWebSocketHandler:
         _input_mode   — "text" or "audio"; switches when browser sends binary
     """
 
-    def __init__(self, session_id: str | None = None) -> None:
+    def __init__(self, session_id: str | None = None, tenant_id: str = "demo") -> None:
         """Initialize per-connection state for one browser session."""
         self.session_id = session_id or f"sess_{int(time.time() * 1000)}"
+        self.tenant_id = tenant_id
+        self._memory_key = _memory_scope_key(self.session_id, self.tenant_id)
         # Fetch old memory from the global store, or start a new list if it's a new session
-        if self.session_id not in GLOBAL_SESSIONS:
-            GLOBAL_SESSIONS[self.session_id] = []
-        self._transcript: list[dict[str, str]] = GLOBAL_SESSIONS[self.session_id]
-        self._resumption_handle: str | None = GLOBAL_HANDLES.get(self.session_id)
+        if self._memory_key not in GLOBAL_SESSIONS:
+            GLOBAL_SESSIONS[self._memory_key] = []
+        self._transcript: list[dict[str, str]] = GLOBAL_SESSIONS[self._memory_key]
+        self._resumption_handle: str | None = GLOBAL_HANDLES.get(self._memory_key)
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
@@ -88,7 +95,7 @@ class VoiceWebSocketHandler:
         self._pending_texts_lock = asyncio.Lock()
         self._pending_text_flush_task: asyncio.Task[None] | None = None
         self.action_dispatcher = ActionDispatcher()
-        log.info("voice_handler_created", session_id=self.session_id)
+        log.info("voice_handler_created", session_id=self.session_id, tenant_id=self.tenant_id)
 
     @staticmethod
     def _payload_logging_enabled() -> bool:
@@ -359,7 +366,7 @@ class VoiceWebSocketHandler:
             return
 
         try:
-            saved_state = await store.load_session(self.session_id)
+            saved_state = await store.load_session(self.tenant_id, self.session_id)
         except Exception as exc:
             log.warning(
                 "session_state_restore_failed",
@@ -372,22 +379,23 @@ class VoiceWebSocketHandler:
         if not saved_state:
             return
 
-        GLOBAL_SESSIONS[self.session_id] = list(saved_state.get("transcript", []))
-        self._transcript = GLOBAL_SESSIONS[self.session_id]
+        GLOBAL_SESSIONS[self._memory_key] = list(saved_state.get("transcript", []))
+        self._transcript = GLOBAL_SESSIONS[self._memory_key]
         self._resumption_handle = saved_state.get("resumption_handle")
         if self._resumption_handle:
-            GLOBAL_HANDLES[self.session_id] = self._resumption_handle
+            GLOBAL_HANDLES[self._memory_key] = self._resumption_handle
         else:
-            GLOBAL_HANDLES.pop(self.session_id, None)
+            GLOBAL_HANDLES.pop(self._memory_key, None)
 
-        cart_tools.restore_cart_state(self.session_id, saved_state.get("cart"))
-        restore_checkout_state(self.session_id, saved_state.get("checkout"))
+        cart_tools.restore_cart_state(self.session_id, saved_state.get("cart"), self.tenant_id)
+        restore_checkout_state(self.session_id, saved_state.get("checkout"), self.tenant_id)
         log.info(
             "session_state_restored",
             session_id=self.session_id,
+            tenant_id=self.tenant_id,
             transcript_turns=len(self._transcript),
             has_resumption_handle=bool(self._resumption_handle),
-            cart_items=cart_tools.get_cart(self.session_id).item_count,
+            cart_items=cart_tools.get_cart(self.session_id, self.tenant_id).item_count,
         )
 
     async def _persist_session_state(self) -> None:
@@ -398,11 +406,12 @@ class VoiceWebSocketHandler:
 
         try:
             await store.save_session(
+                self.tenant_id,
                 self.session_id,
                 transcript=list(self._transcript),
                 resumption_handle=self._resumption_handle,
-                cart=cart_tools.export_cart_state(self.session_id),
-                checkout=export_checkout_state(self.session_id),
+                cart=cart_tools.export_cart_state(self.session_id, self.tenant_id),
+                checkout=export_checkout_state(self.session_id, self.tenant_id),
             )
         except Exception as exc:
             log.warning(
@@ -482,9 +491,15 @@ class VoiceWebSocketHandler:
                     if isinstance(parsed, dict) and parsed.get("type") == "cart_sync":
                         page = parsed.get("page", {})
                         cart_items = parsed.get("cart_items", [])
-                        cart_tools.sync_cart_from_browser(self.session_id, cart_items)
+                        cart_tools.sync_cart_from_browser(
+                            self.session_id,
+                            cart_items,
+                            self.tenant_id,
+                        )
                         if checkout_tools.invalidate_checkout_if_cart_changed(
-                            self.session_id, cart_items
+                            self.session_id,
+                            cart_items,
+                            self.tenant_id,
                         ):
                             await self._send_json({"type": "action", "action": "close_checkout"})
 
@@ -511,10 +526,14 @@ class VoiceWebSocketHandler:
                         page = parsed.get("page", {})
                         if "cart_items" in page:
                             cart_tools.sync_cart_from_browser(
-                                self.session_id, page.get("cart_items", [])
+                                self.session_id,
+                                page.get("cart_items", []),
+                                self.tenant_id,
                             )
                             if checkout_tools.invalidate_checkout_if_cart_changed(
-                                self.session_id, page.get("cart_items", [])
+                                self.session_id,
+                                page.get("cart_items", []),
+                                self.tenant_id,
                             ):
                                 await self._send_json(
                                     {"type": "action", "action": "close_checkout"}
@@ -658,6 +677,7 @@ class VoiceWebSocketHandler:
                 call_id = event.get("call_id")
                 # Execute the Python tool using the dispatcher and get a ToolResponse.
                 context = tool_dispatcher.ToolContext(session_id=self.session_id)
+                context.tenant_id = self.tenant_id
                 tool_response = await tool_dispatcher.execute(tool_name, tool_args, context)
                 log.info(
                     "tool_call_result",
@@ -689,7 +709,7 @@ class VoiceWebSocketHandler:
             elif event_type == "resumption_handle":
                 handle = event.get("handle")
                 if handle is not None:
-                    GLOBAL_HANDLES[self.session_id] = handle
+                    GLOBAL_HANDLES[self._memory_key] = handle
                     self._resumption_handle = handle
                     log.info(
                         "resumption_handle_received", handle=handle, session_id=self.session_id

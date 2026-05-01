@@ -25,7 +25,7 @@ _TOOL_EXECUTION_TIMEOUT_S = 5
 class ToolContext:
 
     session_id: str
-    tenant_id:  str | None = None   # Phase 12: multi-tenancy
+    tenant_id: str | None = None
 
 
 _TOOLS: dict[str, Any] = {
@@ -70,13 +70,14 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
             f"Available tools: {', '.join(_TOOLS)}"
         )
     
-    merged_args = {"session_id": context.session_id, **arguments}
+    merged_args = {"session_id": context.session_id, "tenant_id": context.tenant_id, **arguments}
 
     log.info(
         "dispatcher_calling",
         tool=tool_name,
         args={k: str(v)[:40] for k, v in arguments.items()},
         session=context.session_id,
+        tenant_id=context.tenant_id,
     )
     try:
         async with asyncio.timeout(_TOOL_EXECUTION_TIMEOUT_S):

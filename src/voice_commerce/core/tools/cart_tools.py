@@ -28,19 +28,29 @@ log = structlog.get_logger(__name__)
 _CARTS: dict[str, Cart] = {}
 
 
-def _get_cart(session_id: str) -> Cart:
+def _scoped_session_key(session_id: str, tenant_id: str | None = None) -> str:
+    """Build one internal cart key so tenants can reuse the same session_id safely."""
+    return f"{tenant_id or 'demo'}:{session_id}"
+
+
+def _get_cart(session_id: str, tenant_id: str | None = None) -> Cart:
     """Helper to get the cart for a session, creating it if it doesn't exist."""
-    if session_id not in _CARTS:
-        _CARTS[session_id] = Cart(session_id=session_id)
-    return _CARTS[session_id]
+    scoped_session_id = _scoped_session_key(session_id, tenant_id)
+    if scoped_session_id not in _CARTS:
+        _CARTS[scoped_session_id] = Cart(session_id=session_id)
+    return _CARTS[scoped_session_id]
 
 
-def sync_cart_from_browser(session_id: str, items: list[dict[str, Any]]) -> Cart:
+def sync_cart_from_browser(
+    session_id: str,
+    items: list[dict[str, Any]],
+    tenant_id: str | None = None,
+) -> Cart:
     """
     Replace the shadow cart with the browser's current cart snapshot.
     The browser cart is the source of truth for UI-originated mutations.
     """
-    cart = _get_cart(session_id)
+    cart = _get_cart(session_id, tenant_id)
     cart.items.clear()
 
     for index, raw in enumerate(items):
@@ -70,32 +80,37 @@ def sync_cart_from_browser(session_id: str, items: list[dict[str, Any]]) -> Cart
     return cart
 
 
-def get_cart(session_id: str) -> Cart:
+def get_cart(session_id: str, tenant_id: str | None = None) -> Cart:
     """Public accessor for the current session cart."""
-    return _get_cart(session_id)
+    return _get_cart(session_id, tenant_id)
 
 
-def clear_cart(session_id: str) -> Cart:
+def clear_cart(session_id: str, tenant_id: str | None = None) -> Cart:
     """Empty the current session cart and return it."""
-    cart = _get_cart(session_id)
+    cart = _get_cart(session_id, tenant_id)
     cart.items.clear()
     return cart
 
 
-def export_cart_state(session_id: str) -> dict[str, Any]:
+def export_cart_state(session_id: str, tenant_id: str | None = None) -> dict[str, Any]:
     """Serialize the current session cart into a JSON-friendly snapshot."""
-    cart = _get_cart(session_id)
+    cart = _get_cart(session_id, tenant_id)
     return cart.model_dump(mode="json")
 
 
-def restore_cart_state(session_id: str, data: dict[str, Any] | None) -> Cart:
+def restore_cart_state(
+    session_id: str,
+    data: dict[str, Any] | None,
+    tenant_id: str | None = None,
+) -> Cart:
     """Restore one session cart snapshot loaded from persistence."""
+    scoped_session_id = _scoped_session_key(session_id, tenant_id)
     if not data:
-        _CARTS[session_id] = Cart(session_id=session_id)
-        return _CARTS[session_id]
+        _CARTS[scoped_session_id] = Cart(session_id=session_id)
+        return _CARTS[scoped_session_id]
 
     restored = Cart.model_validate({**data, "session_id": session_id})
-    _CARTS[session_id] = restored
+    _CARTS[scoped_session_id] = restored
     return restored
 
 
@@ -103,7 +118,10 @@ def restore_cart_state(session_id: str, data: dict[str, Any] | None) -> Cart:
 
 
 async def add_to_cart(
-    product_id: int, quantity: int = 1, session_id: str = "default"
+    product_id: int,
+    quantity: int = 1,
+    session_id: str = "default",
+    tenant_id: str | None = None,
 ) -> ToolResponse:
     """
     Add a product to the customer's cart, validated against live WooCommerce data.
@@ -129,7 +147,7 @@ async def add_to_cart(
             return ToolResponse.error(f"Sorry, '{product.name}' is currently out of stock.")
 
         # 2. Add to our Pydantic Cart
-        cart = _get_cart(session_id)
+        cart = _get_cart(session_id, tenant_id)
 
         if product_id in cart.items:
             cart.items[product_id].quantity += quantity
@@ -170,19 +188,23 @@ async def add_to_cart(
         )
 
 
-async def show_cart(session_id: str = "default") -> ToolResponse:
+async def show_cart(session_id: str = "default", tenant_id: str | None = None) -> ToolResponse:
     """Show the customer's current cart contents and total."""
     log.info("show_cart", session=session_id)
-    cart = _get_cart(session_id)
+    cart = _get_cart(session_id, tenant_id)
     response = cart.to_tool_response()
     return ToolResponse.success(ai_text=response["ai_text"], data=response["data"])
 
 
-async def remove_from_cart(product_id: int, session_id: str = "default") -> ToolResponse:
+async def remove_from_cart(
+    product_id: int,
+    session_id: str = "default",
+    tenant_id: str | None = None,
+) -> ToolResponse:
     """Remove a product from the cart by its ID."""
     log.info("remove_from_cart", product_id=product_id, session=session_id)
 
-    cart = _get_cart(session_id)
+    cart = _get_cart(session_id, tenant_id)
     if product_id not in cart.items:
         return ToolResponse.error(
             error_msg=f"Product ID {product_id} isn't in your cart. "

@@ -12,6 +12,7 @@ log = structlog.get_logger(__name__)
 
 
 class PersistedSessionState(TypedDict):
+    tenant_id: str
     session_id: str
     transcript: list[dict[str, str]]
     resumption_handle: str | None
@@ -46,14 +47,54 @@ class SessionStateStore:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS session_state (
-                    session_id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL DEFAULT 'demo',
+                    session_id TEXT NOT NULL,
                     transcript JSONB NOT NULL DEFAULT '[]'::jsonb,
                     resumption_handle TEXT,
                     cart JSONB NOT NULL DEFAULT '{}'::jsonb,
                     checkout JSONB,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (tenant_id, session_id)
                 )
+                """
+            )
+            await conn.execute(
+                "ALTER TABLE session_state "
+                "ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'demo'"
+            )
+            await conn.execute(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conname = 'session_state_pkey'
+                          AND conrelid = 'session_state'::regclass
+                    ) THEN
+                        ALTER TABLE session_state DROP CONSTRAINT session_state_pkey;
+                    END IF;
+                END
+                $$
+                """
+            )
+            await conn.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conname = 'session_state_tenant_session_pkey'
+                          AND conrelid = 'session_state'::regclass
+                    ) THEN
+                        ALTER TABLE session_state
+                        ADD CONSTRAINT session_state_tenant_session_pkey
+                        PRIMARY KEY (tenant_id, session_id);
+                    END IF;
+                END
+                $$
                 """
             )
         log.info("session_state_store_ready", host=settings.postgres_host, db=settings.postgres_db)
@@ -65,7 +106,7 @@ class SessionStateStore:
             self._pool = None
             log.info("session_state_store_closed")
 
-    async def load_session(self, session_id: str) -> PersistedSessionState | None:
+    async def load_session(self, tenant_id: str, session_id: str) -> PersistedSessionState | None:
         """Load one saved session snapshot by session_id."""
         if not self.enabled or self._pool is None:
             return None
@@ -74,14 +115,16 @@ class SessionStateStore:
             row = await conn.fetchrow(
                 """
                 SELECT
+                    tenant_id,
                     session_id,
                     transcript::text AS transcript_json,
                     resumption_handle,
                     cart::text AS cart_json,
                     checkout::text AS checkout_json
                 FROM session_state
-                WHERE session_id = $1
+                WHERE tenant_id = $1 AND session_id = $2
                 """,
+                tenant_id,
                 session_id,
             )
 
@@ -92,6 +135,7 @@ class SessionStateStore:
         cart_raw = row["cart_json"] or "{}"
         checkout_raw = row["checkout_json"]
         return {
+            "tenant_id": row["tenant_id"],
             "session_id": row["session_id"],
             "transcript": json.loads(transcript_raw),
             "resumption_handle": row["resumption_handle"],
@@ -101,6 +145,7 @@ class SessionStateStore:
 
     async def save_session(
         self,
+        tenant_id: str,
         session_id: str,
         *,
         transcript: list[dict[str, str]],
@@ -116,6 +161,7 @@ class SessionStateStore:
             await conn.execute(
                 """
                 INSERT INTO session_state (
+                    tenant_id,
                     session_id,
                     transcript,
                     resumption_handle,
@@ -124,14 +170,15 @@ class SessionStateStore:
                     created_at,
                     updated_at
                 )
-                VALUES ($1, $2::jsonb, $3, $4::jsonb, $5::jsonb, NOW(), NOW())
-                ON CONFLICT (session_id) DO UPDATE SET
+                VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6::jsonb, NOW(), NOW())
+                ON CONFLICT (tenant_id, session_id) DO UPDATE SET
                     transcript = EXCLUDED.transcript,
                     resumption_handle = EXCLUDED.resumption_handle,
                     cart = EXCLUDED.cart,
                     checkout = EXCLUDED.checkout,
                     updated_at = NOW()
                 """,
+                tenant_id,
                 session_id,
                 json.dumps(transcript),
                 resumption_handle,
