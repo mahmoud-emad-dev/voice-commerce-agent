@@ -45,6 +45,10 @@ class _SearchQueryCacheEntry(TypedDict):
 _SEARCH_RESULT_CACHE: dict[str, dict[str, _SearchQueryCacheEntry]] = {}
 
 
+def _scoped_session_key(session_id: str, tenant_id: str | None = None) -> str:
+    return f"{tenant_id or 'demo'}:{session_id}"
+
+
 def _query_cache_key(query: str, max_price: float | None, category: str | None) -> str:
     canonical = (
         f"{query.strip().lower()}|"
@@ -54,8 +58,11 @@ def _query_cache_key(query: str, max_price: float | None, category: str | None) 
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
 
 
-def _ensure_session_cache(session_id: str) -> dict[str, _SearchQueryCacheEntry]:
-    cache = _SEARCH_RESULT_CACHE.setdefault(session_id, {})
+def _ensure_session_cache(
+    session_id: str,
+    tenant_id: str | None = None,
+) -> dict[str, _SearchQueryCacheEntry]:
+    cache = _SEARCH_RESULT_CACHE.setdefault(_scoped_session_key(session_id, tenant_id), {})
     if len(cache) >= _MAX_QUERIES_PER_SESSION:
         oldest_key = next(iter(cache))
         cache.pop(oldest_key, None)
@@ -80,6 +87,7 @@ async def search_products(
     limit: int = _DEFAULT_PAGE_SIZE,
     offset: int = 0,
     session_id: str = "default",
+    tenant_id: str | None = None,
 ) -> ToolResponse:
     """
     Search the product catalog for items matching a natural language query.
@@ -115,7 +123,7 @@ async def search_products(
                 "Please give me a few seconds and try your search again."
             )
         # 1. Resolve cursor state for this session/query.
-        session_cache = _ensure_session_cache(session_id)
+        session_cache = _ensure_session_cache(session_id, tenant_id)
         resolved_category = rag.resolve_category_name(category) if category else None
         cache_key = _query_cache_key(query, max_price, resolved_category)
         cache_entry = session_cache.get(cache_key)
@@ -208,7 +216,11 @@ async def search_products(
         )
 
 
-async def get_product_details(product_id: int, session_id: str = "default") -> ToolResponse:
+async def get_product_details(
+    product_id: int,
+    session_id: str = "default",
+    tenant_id: str | None = None,
+) -> ToolResponse:
     """
     Return full details for a specific product by its ID.
 
@@ -257,6 +269,7 @@ async def search_categories(
     limit: int | None = None,
     offset: int = 0,
     session_id: str = "default",
+    tenant_id: str | None = None,
 ) -> ToolResponse:
     """
     Browse catalog by category.
