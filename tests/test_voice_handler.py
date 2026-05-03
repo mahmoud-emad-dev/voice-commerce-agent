@@ -110,6 +110,14 @@ class TestVoiceWebSocketConnection:
         except Exception as e:
             pytest.fail(f"Connection with session_id failed: {e}")
 
+    def test_websocket_with_tenant_query_params(self, sync_client: TestClient) -> None:
+        with sync_client.websocket_connect(
+            "/ws/voice?tenant_id=demo&tenant_key=demo-local-key&session_id=tenant-voice-test"
+        ) as ws:
+            raw = ws.receive_text()
+            data = json.loads(raw)
+            assert "type" in data
+
     def test_websocket_without_session_id_auto_generates(
         self, sync_client: TestClient
     ) -> None:
@@ -170,11 +178,11 @@ class FakeSessionStateStore:
         self.loaded_state = loaded_state
         self.saved_calls: list[dict] = []
 
-    async def load_session(self, session_id: str) -> dict | None:
+    async def load_session(self, tenant_id: str, session_id: str) -> dict | None:
         return self.loaded_state
 
-    async def save_session(self, session_id: str, **kwargs) -> None:
-        self.saved_calls.append({"session_id": session_id, **kwargs})
+    async def save_session(self, tenant_id: str, session_id: str, **kwargs) -> None:
+        self.saved_calls.append({"tenant_id": tenant_id, "session_id": session_id, **kwargs})
 
 
 async def test_user_text_is_buffered_until_gemini_connects() -> None:
@@ -201,8 +209,9 @@ async def test_user_text_is_buffered_until_gemini_connects() -> None:
 
 async def test_load_persisted_state_restores_transcript_cart_and_checkout(monkeypatch) -> None:
     session_id = "persisted-state-test"
-    GLOBAL_SESSIONS.pop(session_id, None)
-    GLOBAL_HANDLES.pop(session_id, None)
+    memory_key = f"demo:{session_id}"
+    GLOBAL_SESSIONS.pop(memory_key, None)
+    GLOBAL_HANDLES.pop(memory_key, None)
     cart_tools.clear_cart(session_id)
     clear_checkout(session_id)
 
@@ -245,7 +254,7 @@ async def test_load_persisted_state_restores_transcript_cart_and_checkout(monkey
 
     assert handler._transcript == [{"role": "user", "text": "show me jackets"}]
     assert handler._resumption_handle == "resume-123"
-    assert GLOBAL_HANDLES[session_id] == "resume-123"
+    assert GLOBAL_HANDLES[memory_key] == "resume-123"
     assert cart_tools.get_cart(session_id).item_count == 2
     assert get_checkout(session_id) is not None
     assert get_checkout(session_id).step == "payment"
@@ -253,8 +262,9 @@ async def test_load_persisted_state_restores_transcript_cart_and_checkout(monkey
 
 async def test_persist_session_state_saves_current_snapshot(monkeypatch) -> None:
     session_id = "persist-session-test"
-    GLOBAL_SESSIONS.pop(session_id, None)
-    GLOBAL_HANDLES.pop(session_id, None)
+    memory_key = f"demo:{session_id}"
+    GLOBAL_SESSIONS.pop(memory_key, None)
+    GLOBAL_HANDLES.pop(memory_key, None)
     cart_tools.clear_cart(session_id)
     clear_checkout(session_id)
 
@@ -278,10 +288,34 @@ async def test_persist_session_state_saves_current_snapshot(monkeypatch) -> None
     assert len(store.saved_calls) == 1
     saved = store.saved_calls[0]
     assert saved["session_id"] == session_id
+    assert saved["tenant_id"] == "demo"
     assert saved["transcript"] == [{"role": "user", "text": "hello"}]
     assert saved["resumption_handle"] == "resume-999"
     assert saved["cart"]["items"]["55"]["name"] == "Runner Tee"
     assert saved["checkout"]["step"] == "confirm"
+
+
+async def test_tenant_scoped_state_does_not_mix_between_tenants(monkeypatch) -> None:
+    session_id = "shared-session"
+    store = FakeSessionStateStore()
+    monkeypatch.setattr(
+        "voice_commerce.handlers.voice_websocket_handler.get_session_state_store",
+        lambda: store,
+    )
+
+    demo_handler = VoiceWebSocketHandler(session_id=session_id, tenant_id="demo")
+    demo_handler._transcript.append({"role": "user", "text": "demo hello"})
+    cart_tools.get_cart(session_id, "demo").items[1] = CartItem(
+        product_id=1,
+        name="Demo Item",
+        price=10.0,
+        quantity=1,
+    )
+    await demo_handler._persist_session_state()
+
+    store_two_handler = VoiceWebSocketHandler(session_id=session_id, tenant_id="store-two")
+    assert store_two_handler._transcript == []
+    assert cart_tools.get_cart(session_id, "store-two").item_count == 0
 
 
 @pytest.mark.integration
