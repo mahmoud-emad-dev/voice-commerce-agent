@@ -30,6 +30,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-voice_commerce}
       POSTGRES_USER: ${POSTGRES_USER:-voice_commerce}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voice_commerce}
+      TENANT_MODE: ${TENANT_MODE:-demo}
+      DEMO_TENANT_ID: ${DEMO_TENANT_ID:-demo}
+      DEMO_TENANT_NAME: ${DEMO_TENANT_NAME:-NEXFIT Demo}
+      DEMO_TENANT_API_KEY: ${DEMO_TENANT_API_KEY:-demo-local-key}
+      DEMO_TENANT_ALLOWED_ORIGINS: ${DEMO_TENANT_ALLOWED_ORIGINS:-["*"]}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
     ports:
       - "8000:8000"
     depends_on:
