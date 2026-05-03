@@ -12,13 +12,17 @@ import structlog
 from fastapi import FastAPI
 
 from voice_commerce.api.middleware.cors import add_cors_middleware
-from voice_commerce.api.routes import health, voice, widget
+from voice_commerce.api.routes import admin, health, voice, widget
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
 from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.services.session_state_store import (
     initialize_session_state_store,
     shutdown_session_state_store,
+)
+from voice_commerce.services.tenant_service import (
+    initialize_tenant_service,
+    shutdown_tenant_service,
 )
 
 log = structlog.get_logger(__name__)
@@ -106,6 +110,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
 
     await initialize_session_state_store()
     log.info("app_startup_session_state_store_initialized", enabled=settings.postgres_enabled)
+    await initialize_tenant_service()
+    log.info("app_startup_tenant_service_initialized", mode=settings.tenant_mode)
 
     # Warm the demo catalog in the background so semantic search is ready soon
     # after startup without blocking the server boot sequence.
@@ -123,6 +129,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
 
     await shutdown_session_state_store()
     log.info("app_shutdown_session_state_store_closed")
+    await shutdown_tenant_service()
+    log.info("app_shutdown_tenant_service_closed")
 
     log.info("Application  shut down completed")
 
@@ -162,6 +170,7 @@ def create_app() -> FastAPI:
 
     # Register other routes
     app.include_router(health.router, tags=["system"])
+    app.include_router(admin.router, prefix="/admin", tags=["admin"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
     app.include_router(widget.router, prefix="/static", tags=["widget"])
 
