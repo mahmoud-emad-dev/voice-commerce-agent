@@ -37,6 +37,7 @@ async def test_ready_returns_200_or_503(async_client: AsyncClient) -> None:
     payload = response.json()
     assert "checks" in payload
     assert "session_store" in payload["checks"]
+    assert "tenant_service" in payload["checks"]
 
 
 # =============================================================================
