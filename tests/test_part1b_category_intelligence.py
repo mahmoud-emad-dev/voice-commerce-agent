@@ -103,7 +103,8 @@ def test_build_category_indexes_summary_and_grouped_snapshots() -> None:
 
 def test_safe_read_accessors_return_copies() -> None:
     rag = RagService()
-    rag._category_summary = {
+    state = rag._get_tenant_state()
+    state.category_summary = {
         "Men": {
             "count": 1,
             "example_names": ["Road Runner"],
@@ -113,7 +114,7 @@ def test_safe_read_accessors_return_copies() -> None:
             "parent_groups": ["Men"],
         }
     }
-    rag._products_by_category = {
+    state.products_by_category = {
         "Men": [
             {
                 "id": 1,
@@ -134,8 +135,8 @@ def test_safe_read_accessors_return_copies() -> None:
     summary_copy["Men"]["example_names"].append("Mutated")
     grouped_copy["Men"][0]["name"] = "Changed"
 
-    assert rag._category_summary["Men"]["example_names"] == ["Road Runner"]
-    assert rag._products_by_category["Men"][0]["name"] == "Road Runner"
+    assert state.category_summary["Men"]["example_names"] == ["Road Runner"]
+    assert state.products_by_category["Men"][0]["name"] == "Road Runner"
     assert summary_copy["Men"]["parent_groups"] == ["Men"]
 
 

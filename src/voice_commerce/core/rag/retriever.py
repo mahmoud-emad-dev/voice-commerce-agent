@@ -54,7 +54,8 @@ class Retriever:
         limit: int = 5,
         offset: int = 0,
         max_price: float | None = None,
-        ) -> list[Product]:
+        tenant_id: str = "demo",
+    ) -> list[Product]:
         """
         Embed the query and search Qdrant for the most similar products.
 
@@ -86,6 +87,7 @@ class Retriever:
                 limit=limit,
                 offset=offset,
                 max_price=max_price,
+                tenant_id=tenant_id,
             )
         except Exception as e:
             log.exception("retriever_search_failed", query=query[:80], error=str(e))

@@ -48,15 +48,79 @@ class FakeStoreClient:
 
 
 class FakeRagService:
-    def __init__(self, products: list[Product]) -> None:
-        self._products = products
+    def __init__(self, products_by_tenant: dict[str, list[Product]]) -> None:
+        self._products_by_tenant = products_by_tenant
         self.is_ready = True
-        self._category_lookup = {
-            product.categories[0].name.lower(): product.categories[0].name for product in products
-        }
 
-    def resolve_category_name(self, category: str) -> str | None:
-        return self._category_lookup.get(category.strip().lower())
+    def _products(self, tenant_id: str | None) -> list[Product]:
+        return self._products_by_tenant.get(tenant_id or "demo", [])
+
+    def resolve_category_name(self, category: str, tenant_id: str | None = None) -> str | None:
+        lookup = {
+            product.categories[0].name.lower(): product.categories[0].name
+            for product in self._products(tenant_id)
+        }
+        return lookup.get(category.strip().lower())
+
+    def get_category_summary(self, tenant_id: str | None = None) -> dict[str, dict]:
+        summary: dict[str, dict] = {}
+        for product in self._products(tenant_id):
+            category_name = product.categories[0].name
+            summary.setdefault(
+                category_name,
+                {
+                    "count": 0,
+                    "example_names": [],
+                    "subcategories": [],
+                    "parent_groups": [],
+                },
+            )
+            summary[category_name]["count"] += 1
+            summary[category_name]["example_names"].append(product.name)
+        return summary
+
+    def search_category_summaries(
+        self,
+        keyword: str | None = None,
+        tenant_id: str | None = None,
+    ) -> list[tuple[str, dict]]:
+        summary = self.get_category_summary(tenant_id)
+        return list(summary.items())
+
+    def get_products_for_category(
+        self,
+        category: str,
+        tenant_id: str | None = None,
+        *,
+        max_price: float | None = None,
+        in_stock_only: bool = False,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict]:
+        items = []
+        for product in self._products(tenant_id):
+            if category not in product.category_names:
+                continue
+            if max_price is not None and product.price > max_price:
+                continue
+            if in_stock_only and product.stock_status != "instock":
+                continue
+            items.append(
+                {
+                    "id": product.id,
+                    "name": product.name,
+                    "price": float(product.price),
+                    "stock_status": product.stock_status,
+                    "main_category": category,
+                    "sub_category": category,
+                    "leaf_category": category,
+                    "full_path": category,
+                }
+            )
+        sliced = items[offset:]
+        if limit is not None:
+            sliced = sliced[:limit]
+        return sliced
 
     async def search_products(
         self,
@@ -65,13 +129,14 @@ class FakeRagService:
         offset: int = 0,
         max_price: float | None = None,
         category: str | None = None,
+        tenant_id: str = "demo",
     ) -> list[Product]:
         normalized_query = query.strip().lower()
         if normalized_query == "حذاء رياضي":
             normalized_query = "running shoe"
 
         results = []
-        for product in self._products:
+        for product in self._products(tenant_id):
             haystack = " ".join(
                 [
                     product.name.lower(),
@@ -91,17 +156,32 @@ class FakeRagService:
 
 @pytest.fixture(autouse=True)
 def fake_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    products = [
+    demo_products = [
         _product(product_id=1, name="Aero Running Shoes", price=89.0, category="Shoes"),
         _product(product_id=2, name="Summit Trail Shoes", price=120.0, category="Shoes"),
         _product(product_id=3, name="Flex Training Gloves", price=35.0, category="Gloves"),
         _product(product_id=4, name="Pulse Headphones", price=149.0, category="Accessories"),
     ]
-    store_client = FakeStoreClient(products)
-    rag = FakeRagService(products)
+    store_two_products = [
+        _product(product_id=1, name="Studio Yoga Mat", price=59.0, category="Yoga"),
+        _product(product_id=2, name="Zen Balance Block", price=24.0, category="Yoga"),
+    ]
+    store_clients = {
+        "demo": FakeStoreClient(demo_products),
+        "store-two": FakeStoreClient(store_two_products),
+    }
+    rag = FakeRagService({"demo": demo_products, "store-two": store_two_products})
 
-    monkeypatch.setattr(product_tools, "get_client", lambda: store_client)
-    monkeypatch.setattr(cart_tools, "get_client", lambda: store_client)
+    monkeypatch.setattr(
+        product_tools,
+        "get_client_for_tenant",
+        lambda tenant_id=None: store_clients[tenant_id or "demo"],
+    )
+    monkeypatch.setattr(
+        cart_tools,
+        "get_client_for_tenant",
+        lambda tenant_id=None: store_clients[tenant_id or "demo"],
+    )
     monkeypatch.setattr(product_tools, "get_rag_service", lambda: rag)
 
     cart_tools._CARTS.clear()
@@ -207,6 +287,26 @@ class TestGetProductDetails:
         for i in range(1, 5):
             result = await product_tools.get_product_details(product_id=i)
             assert result.status == "success"
+
+    async def test_product_details_are_tenant_scoped(self) -> None:
+        result = await product_tools.get_product_details(product_id=1, tenant_id="store-two")
+        assert result.status == "success"
+        assert "Studio Yoga Mat" in result.ai_text
+
+
+class TestTenantCatalogIsolation:
+
+    async def test_search_products_filters_by_tenant_catalog(self) -> None:
+        result = await product_tools.search_products(query="yoga", tenant_id="store-two")
+        assert result.status == "success"
+        assert "Studio Yoga Mat" in result.ai_text
+        assert "Aero Running Shoes" not in result.ai_text
+
+    async def test_search_categories_filters_by_tenant_catalog(self) -> None:
+        result = await product_tools.search_categories(category="Yoga", tenant_id="store-two")
+        assert result.status == "success"
+        assert result.data["category"] == "Yoga"
+        assert len(result.data["products"]) == 2
 
 
 # =============================================================================
