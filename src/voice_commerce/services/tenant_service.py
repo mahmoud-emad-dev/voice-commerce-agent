@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from pathlib import Path
 
 import asyncpg
 import structlog
@@ -25,12 +26,30 @@ def _default_collection_name(tenant_id: str) -> str:
     return f"catalog_{tenant_id}"
 
 
+def _normalize_catalog_path(raw_path: str | None) -> str:
+    resolved_path = str(raw_path or settings.demo_tenant_catalog_path).strip()
+    if not resolved_path:
+        resolved_path = settings.demo_tenant_catalog_path
+    if not resolved_path.lower().endswith(".csv"):
+        raise ValueError("catalog_path must point to a CSV file.")
+    return resolved_path
+
+
+def _catalog_path_exists(catalog_path: str) -> bool:
+    candidate = Path(catalog_path)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return candidate.exists()
+
+
 def _demo_tenant() -> Tenant:
     tenant_id = settings.demo_tenant_id
     return Tenant(
         tenant_id=tenant_id,
         display_name=settings.demo_tenant_name,
         allowed_origins=list(settings.demo_tenant_allowed_origins),
+        catalog_source="csv",
+        catalog_path=_normalize_catalog_path(settings.demo_tenant_catalog_path),
         qdrant_collection=_default_collection_name(tenant_id),
         status="active",
         api_key_hash=_hash_api_key(settings.demo_tenant_api_key),
@@ -73,6 +92,8 @@ class TenantService:
                     tenant_id TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
                     allowed_origins JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    catalog_source TEXT NOT NULL DEFAULT 'csv',
+                    catalog_path TEXT NOT NULL,
                     qdrant_collection TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
                     api_key_hash TEXT NOT NULL,
@@ -81,6 +102,15 @@ class TenantService:
                 )
                 """
             )
+            await conn.execute(
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "
+                "catalog_source TEXT NOT NULL DEFAULT 'csv'"
+            )
+            await conn.execute(
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS catalog_path TEXT NOT NULL DEFAULT '"
+                + _normalize_catalog_path(settings.demo_tenant_catalog_path).replace("'", "''")
+                + "'",
+            )
             demo = _demo_tenant()
             await conn.execute(
                 """
@@ -88,16 +118,20 @@ class TenantService:
                     tenant_id,
                     display_name,
                     allowed_origins,
+                    catalog_source,
+                    catalog_path,
                     qdrant_collection,
                     status,
                     api_key_hash,
                     created_at,
                     updated_at
                 )
-                VALUES ($1, $2, $3::jsonb, $4, $5, $6, NOW(), NOW())
+                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, NOW(), NOW())
                 ON CONFLICT (tenant_id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
                     allowed_origins = EXCLUDED.allowed_origins,
+                    catalog_source = EXCLUDED.catalog_source,
+                    catalog_path = EXCLUDED.catalog_path,
                     qdrant_collection = EXCLUDED.qdrant_collection,
                     status = EXCLUDED.status,
                     api_key_hash = EXCLUDED.api_key_hash,
@@ -106,6 +140,8 @@ class TenantService:
                 demo.tenant_id,
                 demo.display_name,
                 json.dumps(demo.allowed_origins),
+                demo.catalog_source,
+                demo.catalog_path,
                 demo.qdrant_collection,
                 demo.status,
                 demo.api_key_hash,
@@ -134,6 +170,8 @@ class TenantService:
                     tenant_id,
                     display_name,
                     allowed_origins::text AS allowed_origins_json,
+                    catalog_source,
+                    catalog_path,
                     qdrant_collection,
                     status,
                     api_key_hash,
@@ -150,6 +188,8 @@ class TenantService:
             tenant_id=row["tenant_id"],
             display_name=row["display_name"],
             allowed_origins=json.loads(row["allowed_origins_json"] or "[]"),
+            catalog_source=row["catalog_source"],
+            catalog_path=row["catalog_path"],
             qdrant_collection=row["qdrant_collection"],
             status=row["status"],
             api_key_hash=row["api_key_hash"],
@@ -169,6 +209,8 @@ class TenantService:
                     tenant_id,
                     display_name,
                     allowed_origins::text AS allowed_origins_json,
+                    catalog_source,
+                    catalog_path,
                     qdrant_collection,
                     status,
                     api_key_hash,
@@ -183,6 +225,8 @@ class TenantService:
                 tenant_id=row["tenant_id"],
                 display_name=row["display_name"],
                 allowed_origins=json.loads(row["allowed_origins_json"] or "[]"),
+                catalog_source=row["catalog_source"],
+                catalog_path=row["catalog_path"],
                 qdrant_collection=row["qdrant_collection"],
                 status=row["status"],
                 api_key_hash=row["api_key_hash"],
@@ -197,12 +241,16 @@ class TenantService:
             tenant_id=payload.tenant_id.strip(),
             display_name=payload.display_name.strip(),
             allowed_origins=list(payload.allowed_origins),
+            catalog_source=payload.catalog_source,
+            catalog_path=_normalize_catalog_path(payload.catalog_path),
             qdrant_collection=(
                 payload.qdrant_collection or _default_collection_name(payload.tenant_id)
             ),
             status="active",
             api_key_hash=_hash_api_key(payload.api_key),
         )
+        if not _catalog_path_exists(tenant.catalog_path):
+            raise ValueError("catalog_path does not exist.")
         if not self.use_database or self._pool is None:
             self._memory[tenant.tenant_id] = tenant
             return tenant
@@ -214,16 +262,20 @@ class TenantService:
                     tenant_id,
                     display_name,
                     allowed_origins,
+                    catalog_source,
+                    catalog_path,
                     qdrant_collection,
                     status,
                     api_key_hash,
                     created_at,
                     updated_at
                 )
-                VALUES ($1, $2, $3::jsonb, $4, $5, $6, NOW(), NOW())
+                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, NOW(), NOW())
                 ON CONFLICT (tenant_id) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
                     allowed_origins = EXCLUDED.allowed_origins,
+                    catalog_source = EXCLUDED.catalog_source,
+                    catalog_path = EXCLUDED.catalog_path,
                     qdrant_collection = EXCLUDED.qdrant_collection,
                     status = EXCLUDED.status,
                     api_key_hash = EXCLUDED.api_key_hash,
@@ -232,6 +284,8 @@ class TenantService:
                 tenant.tenant_id,
                 tenant.display_name,
                 json.dumps(tenant.allowed_origins),
+                tenant.catalog_source,
+                tenant.catalog_path,
                 tenant.qdrant_collection,
                 tenant.status,
                 tenant.api_key_hash,
@@ -279,6 +333,8 @@ class TenantService:
             raise TenantResolutionError("Unknown tenant.")
         if not tenant.is_active:
             raise TenantResolutionError("Tenant is disabled.")
+        if not _catalog_path_exists(tenant.catalog_path):
+            raise TenantResolutionError("Tenant catalog is unavailable.")
 
         expected_hash = tenant.api_key_hash
         provided_hash = _hash_api_key(resolved_tenant_key)

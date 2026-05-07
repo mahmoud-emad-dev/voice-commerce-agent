@@ -14,6 +14,7 @@ async def test_demo_tenant_is_available_without_startup() -> None:
     assert tenant is not None
     assert tenant.tenant_id == "demo"
     assert tenant.is_active is True
+    assert tenant.catalog_path.endswith("products.csv")
 
 
 async def test_create_tenant_and_resolve_with_api_key() -> None:
@@ -24,6 +25,7 @@ async def test_create_tenant_and_resolve_with_api_key() -> None:
             display_name="Store Two",
             api_key="store-two-key",
             allowed_origins=["https://store-two.example"],
+            catalog_path="tests/products.csv",
         )
     )
 
@@ -36,6 +38,7 @@ async def test_create_tenant_and_resolve_with_api_key() -> None:
     assert created.tenant_id == "store-two"
     assert resolved.display_name == "Store Two"
     assert resolved.allowed_origins == ["https://store-two.example"]
+    assert resolved.catalog_path == "tests/products.csv"
 
 
 async def test_invalid_tenant_key_raises_resolution_error() -> None:
@@ -45,6 +48,7 @@ async def test_invalid_tenant_key_raises_resolution_error() -> None:
             tenant_id="store-three",
             display_name="Store Three",
             api_key="right-key",
+            catalog_path="tests/products.csv",
         )
     )
 
