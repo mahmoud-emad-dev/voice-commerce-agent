@@ -23,7 +23,7 @@ from typing import TypedDict
 import structlog
 
 from voice_commerce.models.tool_response import ToolResponse
-from voice_commerce.services.csv_client import get_client
+from voice_commerce.services.csv_client import get_client_for_tenant
 from voice_commerce.services.rag_service import (
     CategoryProductSnapshot,
     CategorySummaryEntry,
@@ -111,6 +111,7 @@ async def search_products(
         limit=requested_limit,
         offset=requested_offset,
         session_id=session_id,
+        tenant_id=tenant_id or "demo",
     )
 
     try:
@@ -124,7 +125,7 @@ async def search_products(
             )
         # 1. Resolve cursor state for this session/query.
         session_cache = _ensure_session_cache(session_id, tenant_id)
-        resolved_category = rag.resolve_category_name(category) if category else None
+        resolved_category = rag.resolve_category_name(category, tenant_id) if category else None
         cache_key = _query_cache_key(query, max_price, resolved_category)
         cache_entry = session_cache.get(cache_key)
         seen_ids = set(cache_entry["returned_ids"]) if cache_entry else set()
@@ -142,6 +143,7 @@ async def search_products(
                 offset=rolling_offset,
                 max_price=max_price,
                 category=resolved_category,
+                tenant_id=tenant_id or "demo",
             )
             if not batch:
                 break
@@ -231,9 +233,9 @@ async def get_product_details(
     log.info("get_product_details", product_id=product_id)
 
     try:
-        client = get_client()
+        client = get_client_for_tenant(tenant_id)
         # 1. Fetch live Pydantic Product objects
-        product = await client.get_product(product_id=product_id)  # Live internet search!
+        product = await client.get_product(product_id=product_id)
         if not product:
             return ToolResponse.error(
                 f"I couldn't find product ID {product_id}. "
@@ -296,12 +298,12 @@ async def search_categories(
                 "I am still loading the catalog. Please give me a few seconds and ask again."
             )
 
-        category_summary = rag.category_summary
+        category_summary = rag.get_category_summary(tenant_id)
         if not category_summary:
             return ToolResponse.error("I don't have any category information loaded right now.")
 
         if not category:
-            sorted_categories = rag.search_category_summaries()
+            sorted_categories = rag.search_category_summaries(tenant_id=tenant_id)
             effective_limit = safe_limit or 12
             preview_items = sorted_categories[safe_offset : safe_offset + effective_limit]
             lines = ["Categories available:"]
@@ -338,7 +340,7 @@ async def search_categories(
                 },
             )
 
-        resolved_category = rag.resolve_category_name(category)
+        resolved_category = rag.resolve_category_name(category, tenant_id)
         if not resolved_category:
             return ToolResponse.error(
                 f"I couldn't find a category called '{category}'. "
@@ -347,12 +349,14 @@ async def search_categories(
 
         total_items: list[CategoryProductSnapshot] = rag.get_products_for_category(
             resolved_category,
+            tenant_id,
             max_price=max_price,
             in_stock_only=in_stock_only,
         )
         effective_limit = safe_limit or 5
         items: list[CategoryProductSnapshot] = rag.get_products_for_category(
             resolved_category,
+            tenant_id,
             max_price=max_price,
             in_stock_only=in_stock_only,
             limit=effective_limit,

@@ -8,6 +8,7 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    MatchValue,
     PointStruct,
     Range,
     VectorParams,
@@ -75,7 +76,13 @@ class VectorStore:
             log.info("vector_store_collection_created",
                      collection=self._collection, dim=VECTOR_DIM)
 
-    def upsert(self, products: list[Product], vectors: list[list[float]]) -> int:
+    def upsert(
+        self,
+        products: list[Product],
+        vectors: list[list[float]],
+        *,
+        tenant_id: str,
+    ) -> int:
         """
         Store or update product vectors in Qdrant.
  
@@ -102,27 +109,17 @@ class VectorStore:
 
         points = []
         for product, vector in zip(products, vectors, strict=True):
+            payload = product.model_dump()
+            payload["tenant_id"] = tenant_id
             points.append(
                 PointStruct(
-                    id=product.id, # WooCommerce integer ID
+                    id=f"{tenant_id}:{product.id}",
                     vector=vector,
-                    # We store the ENTIRE Pydantic model as a dictionary cache
-                    payload=product.model_dump(),
-                    # payload={              # stored alongside vector, returned in search results
-                    # "id":          product.id,
-                    # "name":        product.name,
-                    # "price":       product.price,
-                    # "stock":       product.stock_quantity,
-                    # "description": product.description,
-                    # "categories":  product.categories,
-                    # "tags":        product.tags,
-                    # "sku":         product.sku,
-                    # "permalink":   product.permalink,
-                    # },
+                    payload=payload,
                 )
             )
         self._client.upsert(collection_name=self._collection, points=points, wait=True)
-        log.info("vector_store_upserted", count=len(points))
+        log.info("vector_store_upserted", count=len(points), tenant_id=tenant_id)
         return len(points)
 
 
@@ -133,6 +130,7 @@ class VectorStore:
         limit: int = 5,
         offset: int = 0,
         max_price: float | None = None,
+        tenant_id: str = "demo",
     ) -> list[Product]:
         """
         Find the top-k most similar product vectors to the query vector.
@@ -157,14 +155,10 @@ class VectorStore:
           Raise to 0.4-0.5 if you get too many irrelevant results.
           Lower to 0.2 if you get too few results on edge-case queries.
         """
-        query_filter = None
-        # ── DATABASE-LEVEL FILTERING ─────────────────────────────────────────
+        must_conditions = [FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))]
         if max_price is not None:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(key="price", range=Range(lte=max_price))
-                ]
-            )
+            must_conditions.append(FieldCondition(key="price", range=Range(lte=max_price)))
+        query_filter = Filter(must=must_conditions)
         
         results = self._client.query_points(
             collection_name=self._collection,
@@ -176,13 +170,26 @@ class VectorStore:
         ).points
         log.debug("vector_store_search", results=len(results))
         # Re-hydrate the results back into our beautiful Pydantic objects
-        return [Product(**hit.payload) for hit in results if hit.payload]
+        return [
+            Product(**{key: value for key, value in hit.payload.items() if key != "tenant_id"})
+            for hit in results
+            if hit.payload
+        ]
     
     @property
     def count(self) -> int:
         """Number of product vectors currently stored."""
         info = self._client.get_collection(self._collection)
         return info.points_count or 0
+
+    def count_for_tenant(self, tenant_id: str) -> int:
+        """Number of indexed product vectors for one tenant."""
+        return self._client.count(
+            collection_name=self._collection,
+            count_filter=Filter(
+                must=[FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))]
+            ),
+        ).count
 
 
 
