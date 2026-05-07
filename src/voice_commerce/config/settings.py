@@ -124,6 +124,7 @@ class Settings(BaseSettings):
     demo_tenant_name: str = "NEXFIT Demo"
     demo_tenant_api_key: str = "demo-local-key"
     demo_tenant_allowed_origins: list[str] = ["*"]
+    demo_tenant_catalog_path: str = "tests/products.csv"
 
 
 settings = Settings()

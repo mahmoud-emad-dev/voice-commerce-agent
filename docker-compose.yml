@@ -35,6 +35,7 @@ services:
       DEMO_TENANT_NAME: ${DEMO_TENANT_NAME:-NEXFIT Demo}
       DEMO_TENANT_API_KEY: ${DEMO_TENANT_API_KEY:-demo-local-key}
       DEMO_TENANT_ALLOWED_ORIGINS: ${DEMO_TENANT_ALLOWED_ORIGINS:-["*"]}
+      DEMO_TENANT_CATALOG_PATH: ${DEMO_TENANT_CATALOG_PATH:-tests/products.csv}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
     ports:
       - "8000:8000"
