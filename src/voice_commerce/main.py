@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     # pages reproducible and independent from a live storefront.
     from voice_commerce.services import csv_client
 
-    store_client = await csv_client.initialize()
+    store_client = await csv_client.initialize(settings.demo_tenant_catalog_path)
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
 

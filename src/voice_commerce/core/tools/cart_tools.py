@@ -18,7 +18,7 @@ import structlog
 
 from voice_commerce.models.cart import Cart, CartItem
 from voice_commerce.models.tool_response import ToolResponse
-from voice_commerce.services.csv_client import get_client
+from voice_commerce.services.csv_client import get_client_for_tenant
 
 log = structlog.get_logger(__name__)
 
@@ -134,7 +134,7 @@ async def add_to_cart(
 
     try:
         # 1. Validate against LIVE WooCommerce
-        client = get_client()
+        client = get_client_for_tenant(tenant_id)
         product = await client.get_product(product_id)
         # Handle 404 (AI hallucinated the ID or it was deleted)
         if product is None:
