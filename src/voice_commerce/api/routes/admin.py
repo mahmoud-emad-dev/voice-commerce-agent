@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 
 from voice_commerce.config.settings import settings
 from voice_commerce.models.tenant import TenantCreateRequest, to_public_tenant
+from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.services.tenant_service import get_tenant_service
 
 router = APIRouter()
@@ -27,7 +28,11 @@ async def create_tenant(
     x_admin_key: str | None = Header(default=None),
 ) -> dict[str, dict]:
     _require_admin_key(x_admin_key)
-    tenant = await get_tenant_service().create_tenant(payload)
+    try:
+        tenant = await get_tenant_service().create_tenant(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await get_rag_service().sync_tenant_catalog(tenant.tenant_id, tenant.catalog_path)
     return {"tenant": to_public_tenant(tenant).model_dump()}
 
 
