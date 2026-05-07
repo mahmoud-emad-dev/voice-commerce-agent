@@ -12,6 +12,8 @@ class FakeTenantService:
                 tenant_id="demo",
                 display_name="NEXFIT Demo",
                 allowed_origins=["*"],
+                catalog_source="csv",
+                catalog_path="tests/products.csv",
                 qdrant_collection="catalog_demo",
                 status="active",
                 api_key_hash="hash",
@@ -26,6 +28,8 @@ class FakeTenantService:
             tenant_id=payload.tenant_id,
             display_name=payload.display_name,
             allowed_origins=list(payload.allowed_origins),
+            catalog_source=payload.catalog_source,
+            catalog_path=payload.catalog_path or "tests/products.csv",
             qdrant_collection=payload.qdrant_collection or f"catalog_{payload.tenant_id}",
             status="active",
             api_key_hash="hashed",
@@ -41,6 +45,11 @@ class FakeTenantService:
         return tenant
 
 
+class FakeRagService:
+    async def sync_tenant_catalog(self, tenant_id: str, catalog_path: str) -> int:
+        return 0
+
+
 async def test_admin_requires_api_key(async_client: AsyncClient) -> None:
     response = await async_client.get("/admin/tenants")
 
@@ -53,6 +62,7 @@ async def test_admin_can_list_create_and_disable_tenants(
 ) -> None:
     service = FakeTenantService()
     monkeypatch.setattr("voice_commerce.api.routes.admin.get_tenant_service", lambda: service)
+    monkeypatch.setattr("voice_commerce.api.routes.admin.get_rag_service", lambda: FakeRagService())
 
     headers = {"X-Admin-Key": "dev-admin-key"}
     list_response = await async_client.get("/admin/tenants", headers=headers)
@@ -67,10 +77,12 @@ async def test_admin_can_list_create_and_disable_tenants(
             "display_name": "Store Four",
             "api_key": "store-four-key",
             "allowed_origins": ["https://store-four.example"],
+            "catalog_path": "tests/products.csv",
         },
     )
     assert create_response.status_code == 201
     assert create_response.json()["tenant"]["tenant_id"] == "store-four"
+    assert create_response.json()["tenant"]["catalog_path"] == "tests/products.csv"
 
     disable_response = await async_client.patch(
         "/admin/tenants/store-four/disable",
