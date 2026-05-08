@@ -11,10 +11,11 @@ import structlog
 from fastapi import FastAPI
 
 from voice_commerce.api.middleware.cors import add_cors_middleware
-from voice_commerce.api.routes import admin, health, voice, widget
+from voice_commerce.api.routes import admin, health, metrics, voice, widget
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
 from voice_commerce.observability.logging import configure_logging
+from voice_commerce.observability.metrics import initialize_base_metrics
 from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.services.session_state_store import (
     initialize_session_state_store,
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     Factory function to create and configure the FastAPI instance.
     """
     configure_logging()
+    initialize_base_metrics()
 
     app = FastAPI(
         title="Voice Commerce Agent",
@@ -131,6 +133,7 @@ def create_app() -> FastAPI:
 
     # Register other routes
     app.include_router(health.router, tags=["system"])
+    app.include_router(metrics.router, tags=["system"])
     app.include_router(admin.router, prefix="/admin", tags=["admin"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
     app.include_router(widget.router, prefix="/static", tags=["widget"])
