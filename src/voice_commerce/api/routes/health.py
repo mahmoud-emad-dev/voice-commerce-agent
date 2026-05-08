@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
+from voice_commerce.observability.metrics import set_ready_state
 from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.services.session_state_store import get_session_state_store
 from voice_commerce.services.tenant_service import get_tenant_service
@@ -105,6 +106,7 @@ async def readiness_check(response: Response) -> ReadyResponse:
         and tenant_service.enabled
         and not embedder_error
     )
+    set_ready_state(is_ready)
     readiness_status = "ready" if is_ready else "not_ready"
     log.debug("readiness_check_called", checks=checks, is_ready=is_ready)
     if not is_ready:
