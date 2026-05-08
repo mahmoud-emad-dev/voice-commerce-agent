@@ -26,6 +26,10 @@ from voice_commerce.core.state.checkout_state import export_checkout_state, rest
 from voice_commerce.core.tools import cart_tools, checkout_tools, tool_dispatcher
 from voice_commerce.core.voice import audio_processor
 from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
+from voice_commerce.observability.logging import (
+    bind_observability_context,
+    clear_observability_context,
+)
 from voice_commerce.services.session_state_store import get_session_state_store
 
 log = structlog.get_logger(__name__)
@@ -231,6 +235,7 @@ class VoiceWebSocketHandler:
         Sets up the configs of the WebSocket, opens Gemini, and runs the two communication loops.
         """
         # Accept the WebSocket and keep it for the helper send methods.
+        bind_observability_context(tenant_id=self.tenant_id, session_id=self.session_id)
         await websocket.accept()
         self._websocket = websocket
         await self._load_persisted_state()
@@ -358,6 +363,7 @@ class VoiceWebSocketHandler:
             log.info(
                 "ws_handler_finished", session_id=self.session_id, total_turns=len(self._transcript)
             )
+            clear_observability_context()
 
     async def _load_persisted_state(self) -> None:
         """Restore transcript, resumption handle, cart, and checkout from Postgres."""
