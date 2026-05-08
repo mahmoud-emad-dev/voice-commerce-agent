@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import structlog
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -19,6 +21,11 @@ from voice_commerce.core.rag.embedder import VECTOR_DIM
 from voice_commerce.models.product import Product
 
 log = structlog.get_logger(__name__)
+
+
+def _point_id_for_tenant_product(tenant_id: str, product_id: int) -> str:
+    """Build one deterministic Qdrant-safe point ID per tenant/product pair."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"voice-commerce:{tenant_id}:{product_id}"))
 
 class VectorStore:
     """
@@ -113,7 +120,7 @@ class VectorStore:
             payload["tenant_id"] = tenant_id
             points.append(
                 PointStruct(
-                    id=f"{tenant_id}:{product.id}",
+                    id=_point_id_for_tenant_product(tenant_id, product.id),
                     vector=vector,
                     payload=payload,
                 )
