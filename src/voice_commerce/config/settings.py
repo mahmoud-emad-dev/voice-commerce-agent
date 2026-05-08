@@ -33,9 +33,12 @@ class Settings(BaseSettings):
     # APPLICATION SETTINGS
     # =========================================================================
     log_level: str = "INFO"
+    app_env: str = "local"
     app_debug: bool = True
     app_port: int = 8000
     app_version: str = "0.1.0"
+    log_json: bool | None = None
+    log_file_path: str = ""
     debug_payload_logs: bool = False
     enable_public_demo: bool | None = None
     # Which domains can make requests to this API. In production, replace the
@@ -52,6 +55,13 @@ class Settings(BaseSettings):
         if self.enable_public_demo is not None:
             return self.enable_public_demo
         return self.app_debug
+
+    @property
+    def should_log_json(self) -> bool:
+        """Default to JSON logs outside local debug mode unless explicitly overridden."""
+        if self.log_json is not None:
+            return self.log_json
+        return not self.app_debug
 
     # =========================================================================
     # STORE SETTINGS
@@ -125,6 +135,27 @@ class Settings(BaseSettings):
     demo_tenant_api_key: str = "demo-local-key"
     demo_tenant_allowed_origins: list[str] = ["*"]
     demo_tenant_catalog_path: str = "tests/products.csv"
+
+    # =========================================================================
+    # OBSERVABILITY SETTINGS
+    # =========================================================================
+    metrics_enabled: bool = True
+    metrics_require_admin_key: bool = False
+    llm_tracing_enabled: bool = False
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://cloud.langfuse.com"
+    trace_payload_previews: bool = False
+    trace_preview_max_chars: int = 200
+    cost_tracking_enabled: bool = True
+    gemini_text_input_cost_per_1m_tokens: float = 0.0
+    gemini_text_output_cost_per_1m_tokens: float = 0.0
+    gemini_audio_input_cost_per_1m_tokens: float = 0.0
+    gemini_audio_output_cost_per_1m_tokens: float = 0.0
+    gemini_cache_read_cost_per_1m_tokens: float = 0.0
+    gemini_cache_write_cost_per_1m_tokens: float = 0.0
+    gemini_tool_call_cost_per_1k: float = 0.0
 
 
 settings = Settings()
