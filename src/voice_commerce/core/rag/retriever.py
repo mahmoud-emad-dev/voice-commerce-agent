@@ -24,11 +24,14 @@
 
 from __future__ import annotations
 
+import time
+
 import structlog
 
 from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
+from voice_commerce.observability.metrics import observe_embedding
 
 log = structlog.get_logger()
 
@@ -74,9 +77,20 @@ class Retriever:
 
         # 1. Embed the user's spoken query
         log.debug("retriever_embedding_query", query=query[:80])
+        embed_started_at = time.perf_counter()
         try:
             query_vector = embedder.embed(query)
+            observe_embedding(
+                "query",
+                time.perf_counter() - embed_started_at,
+                status="success",
+            )
         except Exception as e:
+            observe_embedding(
+                "query",
+                time.perf_counter() - embed_started_at,
+                status="error",
+            )
             log.error("retriever_embed_error", error=str(e))
             return []
 

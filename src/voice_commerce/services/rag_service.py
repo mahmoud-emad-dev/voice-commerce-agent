@@ -33,6 +33,7 @@ from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.retriever import Retriever
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
+from voice_commerce.observability.metrics import observe_embedding, observe_rag_search
 from voice_commerce.services.csv_client import get_client_for_tenant, initialize_tenant_client
 from voice_commerce.services.tenant_service import get_tenant_service
 
@@ -609,14 +610,25 @@ class RagService:
         )
 
         texts = [p.to_embedding_text() for p in all_products]
+        embed_started_at = time.perf_counter()
         try:
             loop = asyncio.get_running_loop()
             vectors = await loop.run_in_executor(None, lambda: embedder.embed_batch(texts))
         except Exception as e:
+            observe_embedding(
+                "catalog_sync",
+                time.perf_counter() - embed_started_at,
+                status="error",
+            )
             state.last_error = str(e)
             state.sync_complete = False
             log.error("rag_sync_embed_error", tenant_id=tenant_id, error=str(e))
             return 0
+        observe_embedding(
+            "catalog_sync",
+            time.perf_counter() - embed_started_at,
+            status="success",
+        )
 
         try:
             indexed_products = self.v_store.upsert(all_products, vectors, tenant_id=tenant_id)
@@ -675,11 +687,18 @@ class RagService:
         Semantic product search. Runs on every user voice command.
         Embed query and find most similar products using Qdrant.
         """
+        search_started_at = time.perf_counter()
 
         # Fallback if someone speaks before the server finishes booting
         state = self._get_tenant_state(tenant_id)
         if not state.sync_complete:
             log.warning("rag_search_collection_not_ready_yet")
+            observe_rag_search(
+                tenant_id,
+                time.perf_counter() - search_started_at,
+                status="not_ready",
+                result_count=0,
+            )
             return []
 
         strict_category = self._strict_category_for_query(query)
@@ -702,6 +721,12 @@ class RagService:
                     available=len(category_results),
                     returned=len(sorted_results),
                 )
+                observe_rag_search(
+                    tenant_id,
+                    time.perf_counter() - search_started_at,
+                    status="success",
+                    result_count=len(sorted_results),
+                )
                 return sorted_results
 
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
@@ -720,11 +745,23 @@ class RagService:
             )
         except Exception as e:
             log.exception("rag_search_error", query=query[:80], error=str(e))
+            observe_rag_search(
+                tenant_id,
+                time.perf_counter() - search_started_at,
+                status="error",
+                result_count=0,
+            )
             return []
 
         if category:
             resolved_category = self.resolve_category_name(category, tenant_id)
             if not resolved_category:
+                observe_rag_search(
+                    tenant_id,
+                    time.perf_counter() - search_started_at,
+                    status="category_not_found",
+                    result_count=0,
+                )
                 return []
 
             allowed_ids = {
@@ -753,7 +790,14 @@ class RagService:
                 search_results = constrained_results
 
         reranked_results = self._rerank_products_for_query(query, search_results)
-        return self._sort_products_by_price(reranked_results[:limit])
+        final_results = self._sort_products_by_price(reranked_results[:limit])
+        observe_rag_search(
+            tenant_id,
+            time.perf_counter() - search_started_at,
+            status="success",
+            result_count=len(final_results),
+        )
+        return final_results
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 

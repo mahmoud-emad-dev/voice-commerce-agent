@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,6 +9,7 @@ import structlog
 
 from voice_commerce.core.tools import cart_tools, checkout_tools, product_tools, tool_registry
 from voice_commerce.models.tool_response import ToolResponse
+from voice_commerce.observability.metrics import observe_tool_call
 
 log = structlog.get_logger(__name__)
 
@@ -62,9 +64,16 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
       tool_args keys win if there's a collision (Gemini's data is authoritative).
     """
     log.info("Executing tool", tool_name=tool_name, arguments=arguments, session=context.session_id)
+    started_at = time.perf_counter()
 
     if not tool_registry.is_registered(tool_name):
         log.warning("dispatcher_unknown_tool", name=tool_name)
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="unknown_tool",
+        )
         return ToolResponse.error(
             f"I don't have a '{tool_name}' function. "
             f"Available tools: {', '.join(_TOOLS)}"
@@ -82,10 +91,22 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
     try:
         async with asyncio.timeout(_TOOL_EXECUTION_TIMEOUT_S):
             result: ToolResponse = await _TOOLS[tool_name](**merged_args)
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status=result.status,
+        )
         log.info("dispatcher_done", tool=tool_name, result=result.ai_text)
         return result
     
     except TimeoutError:
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="timeout",
+        )
         log.error(
             "dispatcher_timeout",
             tool=tool_name,
@@ -95,10 +116,22 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         return ToolResponse.error("That request took too long. Please try again.")
     
     except TypeError as exc:
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="arg_mismatch",
+        )
         log.warning("dispatcher_arg_mismatch", tool=tool_name, error=str(exc))
         return ToolResponse.error(f"I had trouble calling {tool_name}. Please try rephrasing.")
 
     except Exception as exc:
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="error",
+        )
         log.error("dispatcher_error", tool=tool_name, error=str(exc), exc_info=True)
         return ToolResponse.error("Something went wrong. Please try again.")
 
