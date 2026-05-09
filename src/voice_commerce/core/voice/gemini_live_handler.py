@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,10 @@ from websockets.exceptions import ConnectionClosed
 from voice_commerce.config.settings import settings
 from voice_commerce.core.tools import tool_registry
 from voice_commerce.core.voice import audio_processor, prompts
+from voice_commerce.observability.metrics import (
+    observe_gemini_session_error,
+    observe_gemini_session_open,
+)
 from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 
 log = structlog.get_logger(__name__)
@@ -28,7 +33,10 @@ class GeminiLiveHandler:
     """Handles the bidirectional audio/text stream with Gemini."""
 
     def __init__(
-        self, transcript: list[dict[str, str]], resumption_handle: str | None = None
+        self,
+        transcript: list[dict[str, str]],
+        resumption_handle: str | None = None,
+        tenant_id: str = "demo",
     ) -> None:
         """Prepare one Gemini Live session wrapper for a browser conversation."""
         self._client = genai.Client(api_key=settings.gemini_api_key)
@@ -36,6 +44,7 @@ class GeminiLiveHandler:
         self._session_ctx: Any = None
         self._transcript = transcript or []
         self._resumption_handle = resumption_handle
+        self.tenant_id = tenant_id
         self._category_summary: CategorySummary = get_rag_service().category_summary
         self._category_summary_text = prompts.format_category_summary(self._category_summary)
         self._config = self._build_session_config()
@@ -482,6 +491,7 @@ class GeminiLiveHandler:
     async def __aenter__(self) -> GeminiLiveHandler:
         """Opens the WebSocket to Gemini's servers."""
         log.info("gemini_session_connecting", model=settings.gemini_model)
+        started_at = time.perf_counter()
 
         self._session_ctx = self._client.aio.live.connect(
             model=settings.gemini_model,
@@ -489,7 +499,27 @@ class GeminiLiveHandler:
         )
 
         # Enter the context manager → opens the WebSocket to Gemini's servers
-        self._session = await self._session_ctx.__aenter__()
+        try:
+            self._session = await self._session_ctx.__aenter__()
+        except Exception:
+            observe_gemini_session_open(
+                self.tenant_id,
+                settings.gemini_model,
+                time.perf_counter() - started_at,
+                status="error",
+            )
+            observe_gemini_session_error(
+                self.tenant_id,
+                settings.gemini_model,
+                reason="connect_failed",
+            )
+            raise
+        observe_gemini_session_open(
+            self.tenant_id,
+            settings.gemini_model,
+            time.perf_counter() - started_at,
+            status="success",
+        )
         self._session_closed = False
         log.info("gemini_session_connected")
         return self

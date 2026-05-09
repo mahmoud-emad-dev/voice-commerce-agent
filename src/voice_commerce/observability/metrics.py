@@ -67,6 +67,76 @@ QDRANT_POINTS_UPSERTED_TOTAL = Counter(
     "Total Qdrant points upserted by tenant",
     labelnames=("tenant_id",),
 )
+GEMINI_SESSION_OPEN_DURATION = Histogram(
+    "voice_gemini_session_open_duration_seconds",
+    "Gemini session open duration by tenant, model, and status",
+    labelnames=("tenant_id", "model", "status"),
+)
+GEMINI_SESSIONS_TOTAL = Counter(
+    "voice_gemini_sessions_total",
+    "Gemini session outcomes by tenant, model, and status",
+    labelnames=("tenant_id", "model", "status"),
+)
+GEMINI_SESSION_ERRORS_TOTAL = Counter(
+    "voice_gemini_session_errors_total",
+    "Gemini session error count by tenant, model, and reason",
+    labelnames=("tenant_id", "model", "reason"),
+)
+GEMINI_RECONNECTS_TOTAL = Counter(
+    "voice_gemini_reconnects_total",
+    "Gemini reconnect or go-away count by tenant and reason",
+    labelnames=("tenant_id", "reason"),
+)
+TURNS_TOTAL = Counter(
+    "voice_turns_total",
+    "Completed voice turns by tenant, input mode, and status",
+    labelnames=("tenant_id", "input_mode", "status"),
+)
+TURN_DURATION = Histogram(
+    "voice_turn_duration_seconds",
+    "Voice turn duration by tenant, input mode, and status",
+    labelnames=("tenant_id", "input_mode", "status"),
+)
+TIME_TO_FIRST_AUDIO = Histogram(
+    "voice_time_to_first_audio_seconds",
+    "Time to first output audio by tenant, input mode, and status",
+    labelnames=("tenant_id", "input_mode", "status"),
+)
+TIME_TO_FIRST_TRANSCRIPT = Histogram(
+    "voice_time_to_first_transcript_seconds",
+    "Time to first output transcript by tenant, input mode, and status",
+    labelnames=("tenant_id", "input_mode", "status"),
+)
+AUDIO_INPUT_BYTES_TOTAL = Counter(
+    "voice_audio_input_bytes_total",
+    "Audio input bytes streamed from the browser by tenant",
+    labelnames=("tenant_id",),
+)
+AUDIO_OUTPUT_BYTES_TOTAL = Counter(
+    "voice_audio_output_bytes_total",
+    "Audio output bytes streamed to the browser by tenant",
+    labelnames=("tenant_id",),
+)
+AUDIO_INPUT_SECONDS_TOTAL = Counter(
+    "voice_audio_input_seconds_total",
+    "Approximate input audio seconds sent from the browser by tenant",
+    labelnames=("tenant_id",),
+)
+AUDIO_OUTPUT_SECONDS_TOTAL = Counter(
+    "voice_audio_output_seconds_total",
+    "Approximate output audio seconds sent to the browser by tenant",
+    labelnames=("tenant_id",),
+)
+AUDIO_CHUNKS_IN_TOTAL = Counter(
+    "voice_audio_chunks_in_total",
+    "Input audio chunks received from the browser by tenant",
+    labelnames=("tenant_id",),
+)
+AUDIO_CHUNKS_OUT_TOTAL = Counter(
+    "voice_audio_chunks_out_total",
+    "Output audio chunks sent to the browser by tenant",
+    labelnames=("tenant_id",),
+)
 
 
 def initialize_base_metrics() -> None:
@@ -159,3 +229,111 @@ def observe_qdrant_upsert(
     QDRANT_UPSERT_DURATION.labels(tenant_id=resolved_tenant_id, status=status).observe(duration_s)
     if point_count > 0:
         QDRANT_POINTS_UPSERTED_TOTAL.labels(tenant_id=resolved_tenant_id).inc(point_count)
+
+
+def increment_active_sessions() -> None:
+    """Increment the live active-session gauge."""
+    ACTIVE_SESSIONS.inc()
+
+
+def decrement_active_sessions() -> None:
+    """Decrement the live active-session gauge."""
+    ACTIVE_SESSIONS.dec()
+
+
+def observe_gemini_session_open(
+    tenant_id: str | None,
+    model: str,
+    duration_s: float,
+    *,
+    status: str,
+) -> None:
+    """Record one Gemini session open attempt and duration."""
+    resolved_tenant_id = tenant_id or "demo"
+    GEMINI_SESSION_OPEN_DURATION.labels(
+        tenant_id=resolved_tenant_id,
+        model=model,
+        status=status,
+    ).observe(duration_s)
+    GEMINI_SESSIONS_TOTAL.labels(
+        tenant_id=resolved_tenant_id,
+        model=model,
+        status=status,
+    ).inc()
+
+
+def observe_gemini_session_error(tenant_id: str | None, model: str, *, reason: str) -> None:
+    """Record one Gemini session-side error by reason."""
+    GEMINI_SESSION_ERRORS_TOTAL.labels(
+        tenant_id=tenant_id or "demo",
+        model=model,
+        reason=reason,
+    ).inc()
+
+
+def observe_gemini_reconnect(tenant_id: str | None, *, reason: str) -> None:
+    """Record one reconnect or go-away event for a tenant."""
+    GEMINI_RECONNECTS_TOTAL.labels(tenant_id=tenant_id or "demo", reason=reason).inc()
+
+
+def observe_turn(
+    tenant_id: str | None,
+    input_mode: str,
+    duration_s: float,
+    *,
+    status: str,
+) -> None:
+    """Record one completed turn duration and outcome."""
+    resolved_tenant_id = tenant_id or "demo"
+    TURNS_TOTAL.labels(tenant_id=resolved_tenant_id, input_mode=input_mode, status=status).inc()
+    TURN_DURATION.labels(
+        tenant_id=resolved_tenant_id,
+        input_mode=input_mode,
+        status=status,
+    ).observe(duration_s)
+
+
+def observe_time_to_first_audio(
+    tenant_id: str | None,
+    input_mode: str,
+    duration_s: float,
+    *,
+    status: str,
+) -> None:
+    """Record time to first output audio for one turn."""
+    TIME_TO_FIRST_AUDIO.labels(
+        tenant_id=tenant_id or "demo",
+        input_mode=input_mode,
+        status=status,
+    ).observe(duration_s)
+
+
+def observe_time_to_first_transcript(
+    tenant_id: str | None,
+    input_mode: str,
+    duration_s: float,
+    *,
+    status: str,
+) -> None:
+    """Record time to first output transcript for one turn."""
+    TIME_TO_FIRST_TRANSCRIPT.labels(
+        tenant_id=tenant_id or "demo",
+        input_mode=input_mode,
+        status=status,
+    ).observe(duration_s)
+
+
+def observe_audio_input(tenant_id: str | None, byte_count: int, seconds: float) -> None:
+    """Record one inbound browser audio chunk by bytes and estimated seconds."""
+    resolved_tenant_id = tenant_id or "demo"
+    AUDIO_CHUNKS_IN_TOTAL.labels(tenant_id=resolved_tenant_id).inc()
+    AUDIO_INPUT_BYTES_TOTAL.labels(tenant_id=resolved_tenant_id).inc(byte_count)
+    AUDIO_INPUT_SECONDS_TOTAL.labels(tenant_id=resolved_tenant_id).inc(seconds)
+
+
+def observe_audio_output(tenant_id: str | None, byte_count: int, seconds: float) -> None:
+    """Record one outbound Gemini audio chunk by bytes and estimated seconds."""
+    resolved_tenant_id = tenant_id or "demo"
+    AUDIO_CHUNKS_OUT_TOTAL.labels(tenant_id=resolved_tenant_id).inc()
+    AUDIO_OUTPUT_BYTES_TOTAL.labels(tenant_id=resolved_tenant_id).inc(byte_count)
+    AUDIO_OUTPUT_SECONDS_TOTAL.labels(tenant_id=resolved_tenant_id).inc(seconds)
