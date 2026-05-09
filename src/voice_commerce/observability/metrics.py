@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-from prometheus_client import CONTENT_TYPE_LATEST, Gauge, Info, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, Info, generate_latest
 
 from voice_commerce.config.settings import settings
 
 APP_INFO = Info("voice_app", "Build and runtime info for the voice commerce app")
 READY_STATE = Gauge("voice_ready_state", "Current app readiness state")
 ACTIVE_SESSIONS = Gauge("voice_active_sessions", "Number of active voice sessions")
+STARTUP_DURATION = Histogram(
+    "voice_startup_duration_seconds",
+    "Total app startup duration until lifespan initialization is complete",
+)
+STARTUP_STEP_DURATION = Histogram(
+    "voice_startup_step_duration_seconds",
+    "Startup and warmup step duration by step and status",
+    labelnames=("step", "status"),
+)
+STARTUP_STEP_TOTAL = Counter(
+    "voice_startup_steps_total",
+    "Count of startup and warmup steps by step and status",
+    labelnames=("step", "status"),
+)
 
 
 def initialize_base_metrics() -> None:
@@ -34,3 +48,9 @@ def render_metrics() -> bytes:
 def metrics_content_type() -> str:
     """Return the Prometheus exposition content type."""
     return CONTENT_TYPE_LATEST
+
+
+def observe_startup_step(step: str, duration_s: float, *, status: str) -> None:
+    """Record the duration and outcome of one startup or warmup step."""
+    STARTUP_STEP_DURATION.labels(step=step, status=status).observe(duration_s)
+    STARTUP_STEP_TOTAL.labels(step=step, status=status).inc()
