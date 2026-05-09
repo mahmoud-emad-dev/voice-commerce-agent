@@ -36,6 +36,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
+import voice_commerce.handlers.voice_websocket_handler as voice_handler_module
 from voice_commerce.core.state.checkout_state import (
     CheckoutState,
     clear_checkout,
@@ -316,6 +317,46 @@ async def test_tenant_scoped_state_does_not_mix_between_tenants(monkeypatch) -> 
     store_two_handler = VoiceWebSocketHandler(session_id=session_id, tenant_id="store-two")
     assert store_two_handler._transcript == []
     assert cart_tools.get_cart(session_id, "store-two").item_count == 0
+
+
+async def test_turn_metric_helpers_record_first_audio_and_turn_completion(monkeypatch) -> None:
+    handler = VoiceWebSocketHandler(session_id="turn-metrics-test")
+    observed: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "voice_commerce.handlers.voice_websocket_handler.observe_time_to_first_audio",
+        lambda tenant_id, input_mode, duration_s, status: observed.append(("first_audio", status)),
+    )
+    monkeypatch.setattr(
+        "voice_commerce.handlers.voice_websocket_handler.observe_turn",
+        lambda tenant_id, input_mode, duration_s, status: observed.append(("turn", status)),
+    )
+
+    handler._ensure_turn_started("text")
+    handler._record_first_audio_if_needed()
+    handler._complete_current_turn(status="success")
+
+    assert observed == [("first_audio", "success"), ("turn", "success")]
+
+
+async def test_audio_chunk_helpers_record_input_and_output_metrics(monkeypatch) -> None:
+    handler = VoiceWebSocketHandler(session_id="audio-metrics-test")
+    observed: list[str] = []
+
+    monkeypatch.setattr(
+        "voice_commerce.handlers.voice_websocket_handler.observe_audio_input",
+        lambda tenant_id, byte_count, seconds: observed.append("input"),
+    )
+    monkeypatch.setattr(
+        "voice_commerce.handlers.voice_websocket_handler.observe_audio_output",
+        lambda tenant_id, byte_count, seconds: observed.append("output"),
+    )
+
+    handler._ensure_turn_started("audio")
+    voice_handler_module.observe_audio_input(handler.tenant_id, 3200, 0.1)
+    voice_handler_module.observe_audio_output(handler.tenant_id, 4800, 0.1)
+
+    assert observed == ["input", "output"]
 
 
 @pytest.mark.integration

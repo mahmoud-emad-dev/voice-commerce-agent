@@ -15,6 +15,7 @@ import json
 import re
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
@@ -29,6 +30,16 @@ from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
 from voice_commerce.observability.logging import (
     bind_observability_context,
     clear_observability_context,
+)
+from voice_commerce.observability.metrics import (
+    decrement_active_sessions,
+    increment_active_sessions,
+    observe_audio_input,
+    observe_audio_output,
+    observe_gemini_reconnect,
+    observe_time_to_first_audio,
+    observe_time_to_first_transcript,
+    observe_turn,
 )
 from voice_commerce.services.session_state_store import get_session_state_store
 
@@ -57,6 +68,14 @@ STATUS_ERROR = "error"
 GLOBAL_SESSIONS: dict[str, list[dict[str, str]]] = {}
 GLOBAL_HANDLES: dict[str, str] = {}  # Stores Google's resumption handles
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
+
+
+@dataclass
+class _TurnTimingState:
+    started_at: float
+    input_mode: str
+    first_audio_recorded: bool = False
+    first_transcript_recorded: bool = False
 
 
 def _memory_scope_key(session_id: str, tenant_id: str) -> str:
@@ -99,6 +118,8 @@ class VoiceWebSocketHandler:
         self._pending_texts_lock = asyncio.Lock()
         self._pending_text_flush_task: asyncio.Task[None] | None = None
         self.action_dispatcher = ActionDispatcher()
+        self._current_turn: _TurnTimingState | None = None
+        self._active_session_counted = False
         log.info("voice_handler_created", session_id=self.session_id, tenant_id=self.tenant_id)
 
     @staticmethod
@@ -236,6 +257,8 @@ class VoiceWebSocketHandler:
         """
         # Accept the WebSocket and keep it for the helper send methods.
         bind_observability_context(tenant_id=self.tenant_id, session_id=self.session_id)
+        increment_active_sessions()
+        self._active_session_counted = True
         await websocket.accept()
         self._websocket = websocket
         await self._load_persisted_state()
@@ -254,7 +277,9 @@ class VoiceWebSocketHandler:
         try:
             # 2 ====== Open the Gemini Live session ======
             async with GeminiLiveHandler(
-                transcript=self._transcript, resumption_handle=self._resumption_handle
+                transcript=self._transcript,
+                resumption_handle=self._resumption_handle,
+                tenant_id=self.tenant_id,
             ) as gemini:
                 self._gemini = gemini
                 self._pending_text_flush_task = asyncio.create_task(
@@ -359,11 +384,58 @@ class VoiceWebSocketHandler:
                     await self._pending_text_flush_task
             self._pending_text_flush_task = None
             self._gemini = None
+            if self._active_session_counted:
+                decrement_active_sessions()
+                self._active_session_counted = False
             await self._persist_session_state()
             log.info(
                 "ws_handler_finished", session_id=self.session_id, total_turns=len(self._transcript)
             )
             clear_observability_context()
+
+    def _ensure_turn_started(self, input_mode: str) -> None:
+        """Start a new timing window for one user turn if none is active yet."""
+        if self._current_turn is None:
+            self._current_turn = _TurnTimingState(
+                started_at=time.perf_counter(),
+                input_mode=input_mode,
+            )
+
+    def _record_first_audio_if_needed(self) -> None:
+        """Record latency to the first Gemini audio chunk for the active turn."""
+        if self._current_turn is None or self._current_turn.first_audio_recorded:
+            return
+        self._current_turn.first_audio_recorded = True
+        observe_time_to_first_audio(
+            self.tenant_id,
+            self._current_turn.input_mode,
+            time.perf_counter() - self._current_turn.started_at,
+            status="success",
+        )
+
+    def _record_first_transcript_if_needed(self) -> None:
+        """Record latency to the first output transcript chunk for the active turn."""
+        if self._current_turn is None or self._current_turn.first_transcript_recorded:
+            return
+        self._current_turn.first_transcript_recorded = True
+        observe_time_to_first_transcript(
+            self.tenant_id,
+            self._current_turn.input_mode,
+            time.perf_counter() - self._current_turn.started_at,
+            status="success",
+        )
+
+    def _complete_current_turn(self, *, status: str) -> None:
+        """Close the active turn timing window and record total duration."""
+        if self._current_turn is None:
+            return
+        observe_turn(
+            self.tenant_id,
+            self._current_turn.input_mode,
+            time.perf_counter() - self._current_turn.started_at,
+            status=status,
+        )
+        self._current_turn = None
 
     async def _load_persisted_state(self) -> None:
         """Restore transcript, resumption handle, cart, and checkout from Postgres."""
@@ -468,6 +540,9 @@ class VoiceWebSocketHandler:
                 log.debug(
                     "mic_chunk_received", bytes=len(raw_bytes), session_id=self.session_id
                 )  # for test as temp
+                self._ensure_turn_started("audio")
+                input_seconds = len(raw_bytes) / (audio_processor.MIC_SAMPLE_RATE * 2)
+                observe_audio_input(self.tenant_id, len(raw_bytes), input_seconds)
                 # Stream the raw binary straight into Google's ears
                 if gemini.is_connected:
                     await gemini.send_audio_chunk(raw_bytes)
@@ -568,6 +643,7 @@ class VoiceWebSocketHandler:
 
                 self._user_started_interaction = True
                 self._input_mode = "text"
+                self._ensure_turn_started("text")
                 log.info(
                     "text_message_received",
                     session_id=self.session_id,
@@ -607,6 +683,9 @@ class VoiceWebSocketHandler:
             # ── 1. AUDIO CHUNK (The AI speaking) ──────────────────────────
             if event_type == MSG_AUDIO:
                 audio_bytes: bytes = event["data"]
+                self._record_first_audio_if_needed()
+                output_seconds = len(audio_bytes) / audio_processor.GEMINI_OUTPUT_BYTES_PER_SECOND
+                observe_audio_output(self.tenant_id, len(audio_bytes), output_seconds)
 
                 # Stream the raw audio bytes directly to the browser speakers
                 if audio_processor.is_valid_audio_chunk(audio_bytes):
@@ -625,6 +704,7 @@ class VoiceWebSocketHandler:
                 if not cleaned_output_text:
                     continue
 
+                self._record_first_transcript_if_needed()
                 ai_transcript_text = self._merge_transcript_text(
                     ai_transcript_text, cleaned_output_text
                 )
@@ -759,6 +839,7 @@ class VoiceWebSocketHandler:
                     user_turns=sum(1 for item in self._transcript if item["role"] == "user"),
                     ai_turns=sum(1 for item in self._transcript if item["role"] == "ai"),
                 )
+                self._complete_current_turn(status="success")
                 if persisted_turn:
                     await self._persist_session_state()
                 # Tell the browser to unlock the text box and mic button
@@ -768,6 +849,8 @@ class VoiceWebSocketHandler:
             # --- NEW: Catch Google's warning that the session is about to die! ---
             elif event_type == "go_away":
                 log.info("triggering_graceful_reconnect_due_to_goaway", session=self.session_id)
+                observe_gemini_reconnect(self.tenant_id, reason="go_away")
+                self._complete_current_turn(status="reconnect")
                 # Close the browser websocket with Code 1000 so the frontend instantly reconnects!
                 await websocket.close(code=1000, reason="Gemini session refresh")
                 return
@@ -776,6 +859,8 @@ class VoiceWebSocketHandler:
             elif event_type == "session_closed":
                 reason = event.get("reason", "unknown")
                 log.info("gemini_session_closed_gracefully", reason=reason, session=self.session_id)
+                observe_gemini_reconnect(self.tenant_id, reason=reason)
+                self._complete_current_turn(status="session_closed")
 
                 # If it was a timeout, a 1008 bug, or a 1001 drop, instantly reconnect!
                 if reason in ["gemini_timeout", "gemini_live_1008", "normal_closure"] or event.get(
@@ -790,6 +875,7 @@ class VoiceWebSocketHandler:
             elif event_type == MSG_ERROR:
                 error_message: str = event.get("message", "Unknown Gemini error")
                 log.error("gemini_error", error=error_message, session=self.session_id)
+                self._complete_current_turn(status="error")
                 await self._send_error(f"AI error: {error_message}")
 
     # =========================================================================
