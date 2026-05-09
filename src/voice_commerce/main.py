@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -15,7 +16,11 @@ from voice_commerce.api.routes import admin, health, metrics, voice, widget
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
 from voice_commerce.observability.logging import configure_logging
-from voice_commerce.observability.metrics import initialize_base_metrics
+from voice_commerce.observability.metrics import (
+    STARTUP_DURATION,
+    initialize_base_metrics,
+    observe_startup_step,
+)
 from voice_commerce.services.rag_service import get_rag_service
 from voice_commerce.services.session_state_store import (
     initialize_session_state_store,
@@ -33,11 +38,25 @@ async def _warm_rag_pipeline() -> None:
     """Warm the embedder and then sync the catalog without blocking app startup."""
     rag = get_rag_service()
     try:
+        embedder_started_at = time.perf_counter()
         await embedder.warmup()
+        observe_startup_step(
+            "embedder_warmup",
+            time.perf_counter() - embedder_started_at,
+            status="success",
+        )
         log.info("app_startup_embedder_warmed")
+
+        rag_sync_started_at = time.perf_counter()
         indexed = await rag.sync_catalog()
+        observe_startup_step(
+            "rag_catalog_sync",
+            time.perf_counter() - rag_sync_started_at,
+            status="success",
+        )
         log.info("app_startup_rag_catalog_sync_finished", indexed=indexed)
     except Exception as exc:
+        observe_startup_step("rag_pipeline", 0.0, status="error")
         log.exception("app_startup_rag_pipeline_failed", error=str(exc))
 
 
@@ -45,6 +64,7 @@ async def _warm_rag_pipeline() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     """Manage startup and shutdown resources for the FastAPI application."""
     # --- STARTUP ---
+    startup_started_at = time.perf_counter()
     log.info(
         "voice_commerce_agent_starting",
         port=settings.app_port,
@@ -66,13 +86,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     # pages reproducible and independent from a live storefront.
     from voice_commerce.services import csv_client
 
+    csv_started_at = time.perf_counter()
     store_client = await csv_client.initialize(settings.demo_tenant_catalog_path)
+    observe_startup_step(
+        "csv_client_initialize",
+        time.perf_counter() - csv_started_at,
+        status="success",
+    )
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
 
+    session_store_started_at = time.perf_counter()
     await initialize_session_state_store()
+    observe_startup_step(
+        "session_state_store_initialize",
+        time.perf_counter() - session_store_started_at,
+        status="success",
+    )
     log.info("app_startup_session_state_store_initialized", enabled=settings.postgres_enabled)
+
+    tenant_service_started_at = time.perf_counter()
     await initialize_tenant_service()
+    observe_startup_step(
+        "tenant_service_initialize",
+        time.perf_counter() - tenant_service_started_at,
+        status="success",
+    )
     log.info("app_startup_tenant_service_initialized", mode=settings.tenant_mode)
 
     # Warm the demo catalog in the background so semantic search is ready soon
@@ -80,6 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     get_rag_service()
     asyncio.create_task(_warm_rag_pipeline())
     log.info("app_startup_rag_service_initialized")
+    STARTUP_DURATION.observe(time.perf_counter() - startup_started_at)
 
     yield
 
