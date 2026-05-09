@@ -137,6 +137,46 @@ AUDIO_CHUNKS_OUT_TOTAL = Counter(
     "Output audio chunks sent to the browser by tenant",
     labelnames=("tenant_id",),
 )
+TEXT_INPUT_TOKENS_TOTAL = Counter(
+    "voice_usage_text_input_tokens_total",
+    "Estimated text input tokens by tenant, model, and source",
+    labelnames=("tenant_id", "model", "source"),
+)
+TEXT_OUTPUT_TOKENS_TOTAL = Counter(
+    "voice_usage_text_output_tokens_total",
+    "Estimated text output tokens by tenant, model, and source",
+    labelnames=("tenant_id", "model", "source"),
+)
+AUDIO_INPUT_USAGE_SECONDS_TOTAL = Counter(
+    "voice_usage_audio_input_seconds_total",
+    "Estimated audio input seconds by tenant, model, and source",
+    labelnames=("tenant_id", "model", "source"),
+)
+AUDIO_OUTPUT_USAGE_SECONDS_TOTAL = Counter(
+    "voice_usage_audio_output_seconds_total",
+    "Estimated audio output seconds by tenant, model, and source",
+    labelnames=("tenant_id", "model", "source"),
+)
+AUDIO_INPUT_TOKENS_TOTAL = Counter(
+    "voice_usage_audio_input_tokens_total",
+    "Estimated audio input tokens by tenant, model, and source",
+    labelnames=("tenant_id", "model", "source"),
+)
+AUDIO_OUTPUT_TOKENS_TOTAL = Counter(
+    "voice_usage_audio_output_tokens_total",
+    "Estimated audio output tokens by tenant, model, and source",
+    labelnames=("tenant_id", "model", "source"),
+)
+TOOL_USAGE_TOTAL = Counter(
+    "voice_usage_tool_calls_total",
+    "Estimated tool call usage by tenant, model, and tool name",
+    labelnames=("tenant_id", "model", "tool_name"),
+)
+ESTIMATED_COST_USD_TOTAL = Counter(
+    "voice_estimated_cost_usd_total",
+    "Estimated Gemini cost by tenant, model, and cost kind",
+    labelnames=("tenant_id", "model", "kind"),
+)
 
 
 def initialize_base_metrics() -> None:
@@ -337,3 +377,54 @@ def observe_audio_output(tenant_id: str | None, byte_count: int, seconds: float)
     AUDIO_CHUNKS_OUT_TOTAL.labels(tenant_id=resolved_tenant_id).inc()
     AUDIO_OUTPUT_BYTES_TOTAL.labels(tenant_id=resolved_tenant_id).inc(byte_count)
     AUDIO_OUTPUT_SECONDS_TOTAL.labels(tenant_id=resolved_tenant_id).inc(seconds)
+
+
+def observe_text_usage(
+    tenant_id: str,
+    model: str,
+    tokens: int,
+    *,
+    source: str,
+    direction: str,
+) -> None:
+    """Record estimated text token usage by source and direction."""
+    if tokens <= 0:
+        return
+    target = TEXT_INPUT_TOKENS_TOTAL if direction == "input" else TEXT_OUTPUT_TOKENS_TOTAL
+    target.labels(tenant_id=tenant_id, model=model, source=source).inc(tokens)
+
+
+def observe_audio_usage(
+    tenant_id: str,
+    model: str,
+    *,
+    seconds: float,
+    tokens: int,
+    source: str,
+    direction: str,
+) -> None:
+    """Record estimated audio usage by seconds and tokens."""
+    seconds_target = (
+        AUDIO_INPUT_USAGE_SECONDS_TOTAL
+        if direction == "input"
+        else AUDIO_OUTPUT_USAGE_SECONDS_TOTAL
+    )
+    tokens_target = (
+        AUDIO_INPUT_TOKENS_TOTAL if direction == "input" else AUDIO_OUTPUT_TOKENS_TOTAL
+    )
+    if seconds > 0:
+        seconds_target.labels(tenant_id=tenant_id, model=model, source=source).inc(seconds)
+    if tokens > 0:
+        tokens_target.labels(tenant_id=tenant_id, model=model, source=source).inc(tokens)
+
+
+def observe_tool_usage(tenant_id: str, model: str, tool_name: str) -> None:
+    """Record one tool-call usage unit for cost estimation."""
+    TOOL_USAGE_TOTAL.labels(tenant_id=tenant_id, model=model, tool_name=tool_name).inc()
+
+
+def observe_estimated_cost(tenant_id: str, model: str, amount_usd: float, *, kind: str) -> None:
+    """Record estimated Gemini cost by cost kind."""
+    if amount_usd <= 0:
+        return
+    ESTIMATED_COST_USD_TOTAL.labels(tenant_id=tenant_id, model=model, kind=kind).inc(amount_usd)

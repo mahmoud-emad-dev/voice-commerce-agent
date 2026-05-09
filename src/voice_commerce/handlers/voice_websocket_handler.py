@@ -41,6 +41,11 @@ from voice_commerce.observability.metrics import (
     observe_time_to_first_transcript,
     observe_turn,
 )
+from voice_commerce.observability.usage import (
+    record_audio_input,
+    record_audio_output,
+    record_text_output,
+)
 from voice_commerce.services.session_state_store import get_session_state_store
 
 log = structlog.get_logger(__name__)
@@ -543,6 +548,7 @@ class VoiceWebSocketHandler:
                 self._ensure_turn_started("audio")
                 input_seconds = len(raw_bytes) / (audio_processor.MIC_SAMPLE_RATE * 2)
                 observe_audio_input(self.tenant_id, len(raw_bytes), input_seconds)
+                record_audio_input(self.tenant_id, input_seconds, source="audio_stream")
                 # Stream the raw binary straight into Google's ears
                 if gemini.is_connected:
                     await gemini.send_audio_chunk(raw_bytes)
@@ -676,6 +682,7 @@ class VoiceWebSocketHandler:
             We stay in this `async for` loop for the entire conversation.
         """
         ai_transcript_text = ""
+        streamed_text_output = ""
         user_transcript_text = ""
         async for event in gemini.receive_events():
             event_type = event.get("type")
@@ -686,6 +693,7 @@ class VoiceWebSocketHandler:
                 self._record_first_audio_if_needed()
                 output_seconds = len(audio_bytes) / audio_processor.GEMINI_OUTPUT_BYTES_PER_SECOND
                 observe_audio_output(self.tenant_id, len(audio_bytes), output_seconds)
+                record_audio_output(self.tenant_id, output_seconds, source="audio_stream")
 
                 # Stream the raw audio bytes directly to the browser speakers
                 if audio_processor.is_valid_audio_chunk(audio_bytes):
@@ -749,6 +757,7 @@ class VoiceWebSocketHandler:
                 # THE FIX: Intercept the silent acknowledgment so it doesn't show in the chat UI!
                 if "[SILENT_UPDATE]" in event["text"]:
                     continue
+                streamed_text_output += cleaned_text
                 await self._send_json(
                     {
                         "type": MSG_TEXT,
@@ -831,6 +840,9 @@ class VoiceWebSocketHandler:
                         length=len(full_ai_text),
                         session=self.session_id,
                     )
+                    record_text_output(self.tenant_id, full_ai_text, source="output_transcript")
+                elif streamed_text_output:
+                    record_text_output(self.tenant_id, streamed_text_output, source="text_stream")
 
                 log.info(
                     "memory_turn_saved",
@@ -840,6 +852,7 @@ class VoiceWebSocketHandler:
                     ai_turns=sum(1 for item in self._transcript if item["role"] == "ai"),
                 )
                 self._complete_current_turn(status="success")
+                streamed_text_output = ""
                 if persisted_turn:
                     await self._persist_session_state()
                 # Tell the browser to unlock the text box and mic button

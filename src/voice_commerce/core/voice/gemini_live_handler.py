@@ -24,6 +24,7 @@ from voice_commerce.observability.metrics import (
     observe_gemini_session_error,
     observe_gemini_session_open,
 )
+from voice_commerce.observability.usage import record_text_input
 from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 
 log = structlog.get_logger(__name__)
@@ -180,7 +181,7 @@ class GeminiLiveHandler:
     # =========================================================================
     # SENDING METHODS (App -> Gemini)
     # =========================================================================
-    async def send_text(self, text: str) -> None:
+    async def send_text(self, text: str, *, source: str = "text_message") -> None:
         """Sends text to Gemini and yields response text as it arrives."""
         if not self.is_connected:
             raise RuntimeError(
@@ -189,6 +190,7 @@ class GeminiLiveHandler:
             )
 
         log.debug("gemini_sending_text", text_length=len(text))
+        record_text_input(self.tenant_id, text, source=source)
 
         try:
             await self._session.send_client_content(
@@ -243,6 +245,7 @@ class GeminiLiveHandler:
         if not self.is_connected:
             raise RuntimeError("Cannot send tool result: not connected.")
         log.debug("gemini_sending_tool_result", tool=tool_name, result_length=len(result))
+        record_text_input(self.tenant_id, result, source="tool_result")
 
         try:
             await self._session.send_tool_response(
@@ -324,6 +327,7 @@ class GeminiLiveHandler:
         )
         if self._payload_logging_enabled():
             log.debug("gemini_injecting_context_payload", context_msg=context_msg)
+        record_text_input(self.tenant_id, context_msg, source="context_injection")
         # Send to Gemini using the exact types.Content formatting your file uses
         try:
             await self._session.send_client_content(

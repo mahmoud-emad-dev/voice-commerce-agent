@@ -10,6 +10,7 @@ import structlog
 from voice_commerce.core.tools import cart_tools, checkout_tools, product_tools, tool_registry
 from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.observability.metrics import observe_tool_call
+from voice_commerce.observability.usage import record_tool_call
 
 log = structlog.get_logger(__name__)
 
@@ -91,6 +92,7 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
     try:
         async with asyncio.timeout(_TOOL_EXECUTION_TIMEOUT_S):
             result: ToolResponse = await _TOOLS[tool_name](**merged_args)
+        record_tool_call(context.tenant_id, tool_name)
         observe_tool_call(
             context.tenant_id,
             tool_name,
@@ -101,6 +103,7 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         return result
     
     except TimeoutError:
+        record_tool_call(context.tenant_id, tool_name)
         observe_tool_call(
             context.tenant_id,
             tool_name,
@@ -116,6 +119,7 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         return ToolResponse.error("That request took too long. Please try again.")
     
     except TypeError as exc:
+        record_tool_call(context.tenant_id, tool_name)
         observe_tool_call(
             context.tenant_id,
             tool_name,
@@ -126,6 +130,7 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         return ToolResponse.error(f"I had trouble calling {tool_name}. Please try rephrasing.")
 
     except Exception as exc:
+        record_tool_call(context.tenant_id, tool_name)
         observe_tool_call(
             context.tenant_id,
             tool_name,

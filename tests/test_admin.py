@@ -84,6 +84,10 @@ async def test_admin_can_list_create_and_disable_tenants(
     assert create_response.json()["tenant"]["tenant_id"] == "store-four"
     assert create_response.json()["tenant"]["catalog_path"] == "tests/products.csv"
 
+    usage_response = await async_client.get("/admin/usage", headers=headers)
+    assert usage_response.status_code == 200
+    assert usage_response.json() == {"tenants": {}}
+
     disable_response = await async_client.patch(
         "/admin/tenants/store-four/disable",
         headers=headers,
