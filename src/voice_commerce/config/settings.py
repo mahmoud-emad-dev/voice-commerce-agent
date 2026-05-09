@@ -149,6 +149,8 @@ class Settings(BaseSettings):
     trace_payload_previews: bool = False
     trace_preview_max_chars: int = 200
     cost_tracking_enabled: bool = True
+    gemini_estimated_text_chars_per_token: float = 4.0
+    gemini_estimated_audio_tokens_per_second: float = 32.0
     gemini_text_input_cost_per_1m_tokens: float = 0.0
     gemini_text_output_cost_per_1m_tokens: float = 0.0
     gemini_audio_input_cost_per_1m_tokens: float = 0.0

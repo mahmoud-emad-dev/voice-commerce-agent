@@ -49,9 +49,8 @@ async def voice_endpoint(
     # A UUID4 is random and collision-resistant — good enough for session IDs.
     effective_session_id = session_id or str(uuid.uuid4())
     allow_demo_fallback = bool(settings.app_debug or settings.tenant_mode.strip().lower() == "demo")
-    bind_observability_context(session_id=effective_session_id, tenant_id=tenant_id)
-
     try:
+        bind_observability_context(session_id=effective_session_id, tenant_id=tenant_id)
         tenant = await get_tenant_service().resolve_tenant(
             tenant_id,
             tenant_key,
