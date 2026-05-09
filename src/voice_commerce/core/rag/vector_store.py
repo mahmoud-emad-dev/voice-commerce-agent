@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 
 import structlog
@@ -19,6 +20,7 @@ from qdrant_client.models import (
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag.embedder import VECTOR_DIM
 from voice_commerce.models.product import Product
+from voice_commerce.observability.metrics import observe_qdrant_query, observe_qdrant_upsert
 
 log = structlog.get_logger(__name__)
 
@@ -114,6 +116,7 @@ class VectorStore:
         
         assert len(products) == len(vectors), "products and vectors must have equal length"
 
+        started_at = time.perf_counter()
         points = []
         for product, vector in zip(products, vectors, strict=True):
             payload = product.model_dump()
@@ -125,7 +128,22 @@ class VectorStore:
                     payload=payload,
                 )
             )
-        self._client.upsert(collection_name=self._collection, points=points, wait=True)
+        try:
+            self._client.upsert(collection_name=self._collection, points=points, wait=True)
+        except Exception:
+            observe_qdrant_upsert(
+                tenant_id,
+                time.perf_counter() - started_at,
+                status="error",
+                point_count=0,
+            )
+            raise
+        observe_qdrant_upsert(
+            tenant_id,
+            time.perf_counter() - started_at,
+            status="success",
+            point_count=len(points),
+        )
         log.info("vector_store_upserted", count=len(points), tenant_id=tenant_id)
         return len(points)
 
@@ -166,15 +184,21 @@ class VectorStore:
         if max_price is not None:
             must_conditions.append(FieldCondition(key="price", range=Range(lte=max_price)))
         query_filter = Filter(must=must_conditions)
-        
-        results = self._client.query_points(
-            collection_name=self._collection,
-            query=query_vector,
-            limit=limit,
-            offset=max(0, offset),
-            query_filter=query_filter,
-            score_threshold=0.45,
-        ).points
+
+        started_at = time.perf_counter()
+        try:
+            results = self._client.query_points(
+                collection_name=self._collection,
+                query=query_vector,
+                limit=limit,
+                offset=max(0, offset),
+                query_filter=query_filter,
+                score_threshold=0.45,
+            ).points
+        except Exception:
+            observe_qdrant_query(tenant_id, time.perf_counter() - started_at, status="error")
+            raise
+        observe_qdrant_query(tenant_id, time.perf_counter() - started_at, status="success")
         log.debug("vector_store_search", results=len(results))
         # Re-hydrate the results back into our beautiful Pydantic objects
         return [

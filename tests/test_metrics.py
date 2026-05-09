@@ -3,6 +3,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 from voice_commerce.config.settings import settings
+from voice_commerce.core.tools.tool_dispatcher import ToolContext, execute
 
 
 async def test_metrics_endpoint_is_open_in_local_debug(async_client: AsyncClient) -> None:
@@ -49,3 +50,14 @@ async def test_metrics_endpoint_returns_404_when_disabled(
     response = await async_client.get("/metrics")
 
     assert response.status_code == 404
+
+
+async def test_metrics_include_tool_metrics_after_tool_execution(async_client: AsyncClient) -> None:
+    await execute("show_cart", {}, ToolContext(session_id="metrics-test", tenant_id="demo"))
+
+    response = await async_client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "voice_tool_calls_total" in response.text
+    assert "voice_tool_call_duration_seconds" in response.text
+    assert 'tool_name="show_cart"' in response.text
