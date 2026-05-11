@@ -41,6 +41,7 @@ from voice_commerce.observability.metrics import (
     observe_time_to_first_transcript,
     observe_turn,
 )
+from voice_commerce.observability.tracing import get_tracer
 from voice_commerce.observability.usage import (
     record_audio_input,
     record_audio_output,
@@ -262,6 +263,13 @@ class VoiceWebSocketHandler:
         """
         # Accept the WebSocket and keep it for the helper send methods.
         bind_observability_context(tenant_id=self.tenant_id, session_id=self.session_id)
+        tracer = get_tracer()
+        tracer.start_session(
+            self.session_id,
+            self.tenant_id,
+            model=settings.gemini_model,
+            metadata={"app_env": settings.app_env},
+        )
         increment_active_sessions()
         self._active_session_counted = True
         await websocket.accept()
@@ -392,6 +400,12 @@ class VoiceWebSocketHandler:
             if self._active_session_counted:
                 decrement_active_sessions()
                 self._active_session_counted = False
+            tracer.finish_session(
+                self.session_id,
+                tenant_id=self.tenant_id,
+                metadata={"total_turns": len(self._transcript)},
+            )
+            tracer.flush()
             await self._persist_session_state()
             log.info(
                 "ws_handler_finished", session_id=self.session_id, total_turns=len(self._transcript)

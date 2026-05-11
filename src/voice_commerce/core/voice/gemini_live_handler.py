@@ -24,6 +24,7 @@ from voice_commerce.observability.metrics import (
     observe_gemini_session_error,
     observe_gemini_session_open,
 )
+from voice_commerce.observability.tracing import get_tracer
 from voice_commerce.observability.usage import record_text_input
 from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 
@@ -191,6 +192,12 @@ class GeminiLiveHandler:
 
         log.debug("gemini_sending_text", text_length=len(text))
         record_text_input(self.tenant_id, text, source=source)
+        get_tracer().record_event(
+            "gemini_text_sent",
+            tenant_id=self.tenant_id,
+            input_payload=text,
+            metadata={"source": source},
+        )
 
         try:
             await self._session.send_client_content(
@@ -246,6 +253,15 @@ class GeminiLiveHandler:
             raise RuntimeError("Cannot send tool result: not connected.")
         log.debug("gemini_sending_tool_result", tool=tool_name, result_length=len(result))
         record_text_input(self.tenant_id, result, source="tool_result")
+        get_tracer().record_observation(
+            "gemini_tool_result",
+            as_type="tool",
+            tenant_id=self.tenant_id,
+            input_payload={"tool_name": tool_name},
+            output_payload=result,
+            metadata={"tool_name": tool_name},
+            model=settings.gemini_model,
+        )
 
         try:
             await self._session.send_tool_response(
@@ -328,6 +344,12 @@ class GeminiLiveHandler:
         if self._payload_logging_enabled():
             log.debug("gemini_injecting_context_payload", context_msg=context_msg)
         record_text_input(self.tenant_id, context_msg, source="context_injection")
+        get_tracer().record_event(
+            "gemini_context_injection",
+            tenant_id=self.tenant_id,
+            input_payload=context_msg,
+            metadata={"product_count": len(products), "filter_count": len(filters)},
+        )
         # Send to Gemini using the exact types.Content formatting your file uses
         try:
             await self._session.send_client_content(
@@ -496,6 +518,12 @@ class GeminiLiveHandler:
         """Opens the WebSocket to Gemini's servers."""
         log.info("gemini_session_connecting", model=settings.gemini_model)
         started_at = time.perf_counter()
+        tracer = get_tracer()
+        tracer.record_event(
+            "gemini_session_connecting",
+            tenant_id=self.tenant_id,
+            metadata={"model": settings.gemini_model},
+        )
 
         self._session_ctx = self._client.aio.live.connect(
             model=settings.gemini_model,
@@ -517,6 +545,12 @@ class GeminiLiveHandler:
                 settings.gemini_model,
                 reason="connect_failed",
             )
+            tracer.record_event(
+                "gemini_session_connect_failed",
+                tenant_id=self.tenant_id,
+                metadata={"model": settings.gemini_model},
+                level="ERROR",
+            )
             raise
         observe_gemini_session_open(
             self.tenant_id,
@@ -525,6 +559,11 @@ class GeminiLiveHandler:
             status="success",
         )
         self._session_closed = False
+        tracer.record_event(
+            "gemini_session_connected",
+            tenant_id=self.tenant_id,
+            metadata={"model": settings.gemini_model},
+        )
         log.info("gemini_session_connected")
         return self
 
@@ -534,6 +573,7 @@ class GeminiLiveHandler:
         Called automatically when exiting the `async with` block.
         """
         log.info("gemini_session_closing")
+        tracer = get_tracer()
 
         if self._session_ctx is not None:
             try:
@@ -546,5 +586,10 @@ class GeminiLiveHandler:
                 self._session_closed = True
                 self._session = None
                 self._session_ctx = None
-
+        
+        tracer.record_event(
+            "gemini_session_closed",
+            tenant_id=self.tenant_id,
+            metadata={"model": settings.gemini_model},
+        )
         log.info("gemini_session_closed")
