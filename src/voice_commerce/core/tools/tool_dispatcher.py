@@ -10,6 +10,7 @@ import structlog
 from voice_commerce.core.tools import cart_tools, checkout_tools, product_tools, tool_registry
 from voice_commerce.models.tool_response import ToolResponse
 from voice_commerce.observability.metrics import observe_tool_call
+from voice_commerce.observability.tracing import get_tracer
 from voice_commerce.observability.usage import record_tool_call
 
 log = structlog.get_logger(__name__)
@@ -93,6 +94,16 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         async with asyncio.timeout(_TOOL_EXECUTION_TIMEOUT_S):
             result: ToolResponse = await _TOOLS[tool_name](**merged_args)
         record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_observation(
+            f"tool_{tool_name}",
+            as_type="tool",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            output_payload={"status": result.status},
+            metadata={"tool_name": tool_name, "status": result.status},
+            model=None,
+        )
         observe_tool_call(
             context.tenant_id,
             tool_name,
@@ -104,6 +115,14 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
     
     except TimeoutError:
         record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_event(
+            "tool_timeout",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            metadata={"tool_name": tool_name},
+            level="ERROR",
+        )
         observe_tool_call(
             context.tenant_id,
             tool_name,
@@ -120,6 +139,14 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
     
     except TypeError as exc:
         record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_event(
+            "tool_arg_mismatch",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            metadata={"tool_name": tool_name, "error": str(exc)},
+            level="WARNING",
+        )
         observe_tool_call(
             context.tenant_id,
             tool_name,
@@ -131,6 +158,14 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
 
     except Exception as exc:
         record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_event(
+            "tool_error",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            metadata={"tool_name": tool_name, "error": str(exc)},
+            level="ERROR",
+        )
         observe_tool_call(
             context.tenant_id,
             tool_name,

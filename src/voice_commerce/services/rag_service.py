@@ -34,6 +34,7 @@ from voice_commerce.core.rag.retriever import Retriever
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
 from voice_commerce.observability.metrics import observe_embedding, observe_rag_search
+from voice_commerce.observability.tracing import get_tracer
 from voice_commerce.services.csv_client import get_client_for_tenant, initialize_tenant_client
 from voice_commerce.services.tenant_service import get_tenant_service
 
@@ -727,6 +728,14 @@ class RagService:
                     status="success",
                     result_count=len(sorted_results),
                 )
+                get_tracer().record_observation(
+                    "rag_search",
+                    as_type="retriever",
+                    tenant_id=tenant_id,
+                    input_payload=query,
+                    output_payload={"result_count": len(sorted_results)},
+                    metadata={"category": strict_category, "strategy": "strict_category"},
+                )
                 return sorted_results
 
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
@@ -796,6 +805,14 @@ class RagService:
             time.perf_counter() - search_started_at,
             status="success",
             result_count=len(final_results),
+        )
+        get_tracer().record_observation(
+            "rag_search",
+            as_type="retriever",
+            tenant_id=tenant_id,
+            input_payload=query,
+            output_payload={"result_count": len(final_results)},
+            metadata={"category": category, "max_price": max_price},
         )
         return final_results
 
