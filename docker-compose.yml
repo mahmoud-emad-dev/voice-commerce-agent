@@ -3,14 +3,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY must be set}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-native-audio-preview-12-2025}
+      APP_ENV: ${APP_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      APP_DEBUG: ${APP_DEBUG:-true}
+      LOG_JSON: ${LOG_JSON:-true}
+      APP_DEBUG: ${APP_DEBUG:-false}
       DEBUG_PAYLOAD_LOGS: ${DEBUG_PAYLOAD_LOGS:-false}
       ENABLE_PUBLIC_DEMO: ${ENABLE_PUBLIC_DEMO:-false}
-      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["*"]}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?CORS_ALLOW_ORIGINS must be set}
       STORE_NAME: ${STORE_NAME:-NEXFIT}
       ASSISTANT_NAME: ${ASSISTANT_NAME:-PHOENIX}
       STORE_TAGLINE: ${STORE_TAGLINE:-Your go-to store for performance sports gear.}
@@ -34,35 +37,70 @@ services:
       DEMO_TENANT_ID: ${DEMO_TENANT_ID:-demo}
       DEMO_TENANT_NAME: ${DEMO_TENANT_NAME:-NEXFIT Demo}
       DEMO_TENANT_API_KEY: ${DEMO_TENANT_API_KEY:-demo-local-key}
-      DEMO_TENANT_ALLOWED_ORIGINS: ${DEMO_TENANT_ALLOWED_ORIGINS:-["*"]}
+      DEMO_TENANT_ALLOWED_ORIGINS: ${DEMO_TENANT_ALLOWED_ORIGINS:-[]}
       DEMO_TENANT_CATALOG_PATH: ${DEMO_TENANT_CATALOG_PATH:-tests/products.csv}
-      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_REQUIRE_ADMIN_KEY: ${METRICS_REQUIRE_ADMIN_KEY:-true}
+      LLM_TRACING_ENABLED: ${LLM_TRACING_ENABLED:-false}
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      TRACE_PAYLOAD_PREVIEWS: ${TRACE_PAYLOAD_PREVIEWS:-false}
+      TRACE_PREVIEW_MAX_CHARS: ${TRACE_PREVIEW_MAX_CHARS:-200}
+      COST_TRACKING_ENABLED: ${COST_TRACKING_ENABLED:-true}
+      GEMINI_ESTIMATED_TEXT_CHARS_PER_TOKEN: ${GEMINI_ESTIMATED_TEXT_CHARS_PER_TOKEN:-4}
+      GEMINI_ESTIMATED_AUDIO_TOKENS_PER_SECOND: ${GEMINI_ESTIMATED_AUDIO_TOKENS_PER_SECOND:-32}
+      GEMINI_TEXT_INPUT_COST_PER_1M_TOKENS: ${GEMINI_TEXT_INPUT_COST_PER_1M_TOKENS:-0}
+      GEMINI_TEXT_OUTPUT_COST_PER_1M_TOKENS: ${GEMINI_TEXT_OUTPUT_COST_PER_1M_TOKENS:-0}
+      GEMINI_AUDIO_INPUT_COST_PER_1M_TOKENS: ${GEMINI_AUDIO_INPUT_COST_PER_1M_TOKENS:-0}
+      GEMINI_AUDIO_OUTPUT_COST_PER_1M_TOKENS: ${GEMINI_AUDIO_OUTPUT_COST_PER_1M_TOKENS:-0}
+      GEMINI_CACHE_READ_COST_PER_1M_TOKENS: ${GEMINI_CACHE_READ_COST_PER_1M_TOKENS:-0}
+      GEMINI_CACHE_WRITE_COST_PER_1M_TOKENS: ${GEMINI_CACHE_WRITE_COST_PER_1M_TOKENS:-0}
+      GEMINI_TOOL_CALL_COST_PER_1K: ${GEMINI_TOOL_CALL_COST_PER_1K:-0}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
-      - qdrant
-      - postgres
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)\" || exit 1",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
 
   qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
+    image: qdrant/qdrant:v1.15.4
+    restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:6333/readyz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.8-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-voice_commerce}
       POSTGRES_USER: ${POSTGRES_USER:-voice_commerce}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-voice_commerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-voice_commerce} -d ${POSTGRES_DB:-voice_commerce}"]
       interval: 5s
       timeout: 5s
       retries: 12
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

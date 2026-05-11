@@ -1,0 +1,6 @@
+services:
+  app:
+    build: null
+    image: ${APP_IMAGE:?APP_IMAGE must be set}
+    ports:
+      - "127.0.0.1:8000:8000"
