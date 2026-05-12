@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any
@@ -16,12 +17,16 @@ from google import genai
 from google.genai import types
 from websockets.exceptions import ConnectionClosed
 
-from voice_commerce.core.tools import tool_registry
-from voice_commerce.core.voice import audio_processor
-from voice_commerce.core.voice import prompts
-from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 from voice_commerce.config.settings import settings
-
+from voice_commerce.core.tools import tool_registry
+from voice_commerce.core.voice import audio_processor, prompts
+from voice_commerce.observability.metrics import (
+    observe_gemini_session_error,
+    observe_gemini_session_open,
+)
+from voice_commerce.observability.tracing import get_tracer
+from voice_commerce.observability.usage import record_text_input
+from voice_commerce.services.rag_service import CategorySummary, get_rag_service
 
 log = structlog.get_logger(__name__)
 
@@ -30,7 +35,10 @@ class GeminiLiveHandler:
     """Handles the bidirectional audio/text stream with Gemini."""
 
     def __init__(
-        self, transcript: list[dict[str, str]], resumption_handle: str | None = None
+        self,
+        transcript: list[dict[str, str]],
+        resumption_handle: str | None = None,
+        tenant_id: str = "demo",
     ) -> None:
         """Prepare one Gemini Live session wrapper for a browser conversation."""
         self._client = genai.Client(api_key=settings.gemini_api_key)
@@ -38,6 +46,7 @@ class GeminiLiveHandler:
         self._session_ctx: Any = None
         self._transcript = transcript or []
         self._resumption_handle = resumption_handle
+        self.tenant_id = tenant_id
         self._category_summary: CategorySummary = get_rag_service().category_summary
         self._category_summary_text = prompts.format_category_summary(self._category_summary)
         self._config = self._build_session_config()
@@ -173,7 +182,7 @@ class GeminiLiveHandler:
     # =========================================================================
     # SENDING METHODS (App -> Gemini)
     # =========================================================================
-    async def send_text(self, text: str) -> None:
+    async def send_text(self, text: str, *, source: str = "text_message") -> None:
         """Sends text to Gemini and yields response text as it arrives."""
         if not self.is_connected:
             raise RuntimeError(
@@ -182,11 +191,19 @@ class GeminiLiveHandler:
             )
 
         log.debug("gemini_sending_text", text_length=len(text))
+        record_text_input(self.tenant_id, text, source=source)
+        get_tracer().record_event(
+            "gemini_text_sent",
+            tenant_id=self.tenant_id,
+            input_payload=text,
+            metadata={"source": source},
+        )
 
         try:
             await self._session.send_client_content(
                 turns=types.Content(role="user", parts=[types.Part(text=text)]),
-                turn_complete=True,  # turn_complete=True is the key flag that tells Gemini: "The user is done speaking, please respond now."
+                # turn_complete=True tells Gemini the user finished their turn.
+                turn_complete=True,
             )
         except Exception as exc:
             if self._handle_send_exception("send_text", exc):
@@ -235,6 +252,16 @@ class GeminiLiveHandler:
         if not self.is_connected:
             raise RuntimeError("Cannot send tool result: not connected.")
         log.debug("gemini_sending_tool_result", tool=tool_name, result_length=len(result))
+        record_text_input(self.tenant_id, result, source="tool_result")
+        get_tracer().record_observation(
+            "gemini_tool_result",
+            as_type="tool",
+            tenant_id=self.tenant_id,
+            input_payload={"tool_name": tool_name},
+            output_payload=result,
+            metadata={"tool_name": tool_name},
+            model=settings.gemini_model,
+        )
 
         try:
             await self._session.send_tool_response(
@@ -296,13 +323,15 @@ class GeminiLiveHandler:
             "VISIBLE PRODUCTS ON SCREEN (Numbered in order):\n"
             f"{product_text}\n"
             "CRITICAL RULES:\n"
-            "- If the user says 'the first one', 'the second one', look at the numbered list above.\n"
-            "- NEVER invent or guess a product ID. If a product is not in the list above, or returned by a tool, say you don't see it.\n"
+            "- If the user says 'the first one' or 'the second one', use the numbered list above.\n"
+            "- NEVER invent or guess a product ID. If a product is not in the list above "
+            "or returned by a tool, say you don't see it.\n"
             "CRITICAL INSTRUCTIONS FOR THIS UPDATE:\n"
             "1. Update your internal memory with this new screen state.\n"
             "2. DO NOT respond to this message with any audio whatsoever.\n"
             "3. Do not say 'Okay', 'Understood', or anything else.\n"
-            "4. Acknowledge this silently by outputting exactly the text '[SILENT_UPDATE]' and nothing else."
+            "4. Acknowledge this silently by outputting exactly the text "
+            "'[SILENT_UPDATE]' and nothing else."
         )
 
         log.info(
@@ -314,6 +343,13 @@ class GeminiLiveHandler:
         )
         if self._payload_logging_enabled():
             log.debug("gemini_injecting_context_payload", context_msg=context_msg)
+        record_text_input(self.tenant_id, context_msg, source="context_injection")
+        get_tracer().record_event(
+            "gemini_context_injection",
+            tenant_id=self.tenant_id,
+            input_payload=context_msg,
+            metadata={"product_count": len(products), "filter_count": len(filters)},
+        )
         # Send to Gemini using the exact types.Content formatting your file uses
         try:
             await self._session.send_client_content(
@@ -350,11 +386,10 @@ class GeminiLiveHandler:
             while True:
                 saw_message_in_this_receive_call = False
                 response: types.LiveServerMessage
-                is_audio: bool = False
                 async for response in self._session.receive():
                     saw_message_in_this_receive_call = True
 
-                    # ── 1. TOOL CALLS are top-level on Live API responses. ──────────────────────────────────────────
+                    # Tool calls are top-level on Live API responses.
                     if response.tool_call and response.tool_call.function_calls:
                         for function_call in response.tool_call.function_calls:
                             yield {
@@ -391,7 +426,6 @@ class GeminiLiveHandler:
                                 inline_data = getattr(part, "inline_data", None)
                                 if inline_data and inline_data.data:
                                     audio_data = inline_data.data
-                                    is_audio = True
                                     log.debug("Received gemini_audio_chunk", bytes=len(audio_data))
                                     yield {"type": "audio", "data": audio_data}
 
@@ -429,14 +463,14 @@ class GeminiLiveHandler:
                         log.warning("gemini_go_away", time_left=time_left)
                         yield {"type": "go_away", "time_left": time_left}
 
-                    # if not is_audio:
-                    # log.info("Received response from Gemini:", response=str(response)[:])  # log a preview of the raw response for debugging Temp
-
                 # ── 7. DEAD CONNECTION DETECTOR ────────────────────────────────
                 if not saw_message_in_this_receive_call:
                     log.debug(
                         "gemini_receive_no_message",
-                        message="No messages received in this call to session.receive(). This may indicate a silent disconnection or a network issue.",
+                        message=(
+                            "No messages received in this call to session.receive(). "
+                            "This may indicate a silent disconnection or a network issue."
+                        ),
                     )
                     yield {
                         "type": "session_closed",
@@ -480,9 +514,16 @@ class GeminiLiveHandler:
     # =========================================================================
     # LIFECYCLE MANAGEMENT
     # =========================================================================
-    async def __aenter__(self) -> "GeminiLiveHandler":
+    async def __aenter__(self) -> GeminiLiveHandler:
         """Opens the WebSocket to Gemini's servers."""
         log.info("gemini_session_connecting", model=settings.gemini_model)
+        started_at = time.perf_counter()
+        tracer = get_tracer()
+        tracer.record_event(
+            "gemini_session_connecting",
+            tenant_id=self.tenant_id,
+            metadata={"model": settings.gemini_model},
+        )
 
         self._session_ctx = self._client.aio.live.connect(
             model=settings.gemini_model,
@@ -490,8 +531,39 @@ class GeminiLiveHandler:
         )
 
         # Enter the context manager → opens the WebSocket to Gemini's servers
-        self._session = await self._session_ctx.__aenter__()
+        try:
+            self._session = await self._session_ctx.__aenter__()
+        except Exception:
+            observe_gemini_session_open(
+                self.tenant_id,
+                settings.gemini_model,
+                time.perf_counter() - started_at,
+                status="error",
+            )
+            observe_gemini_session_error(
+                self.tenant_id,
+                settings.gemini_model,
+                reason="connect_failed",
+            )
+            tracer.record_event(
+                "gemini_session_connect_failed",
+                tenant_id=self.tenant_id,
+                metadata={"model": settings.gemini_model},
+                level="ERROR",
+            )
+            raise
+        observe_gemini_session_open(
+            self.tenant_id,
+            settings.gemini_model,
+            time.perf_counter() - started_at,
+            status="success",
+        )
         self._session_closed = False
+        tracer.record_event(
+            "gemini_session_connected",
+            tenant_id=self.tenant_id,
+            metadata={"model": settings.gemini_model},
+        )
         log.info("gemini_session_connected")
         return self
 
@@ -501,6 +573,7 @@ class GeminiLiveHandler:
         Called automatically when exiting the `async with` block.
         """
         log.info("gemini_session_closing")
+        tracer = get_tracer()
 
         if self._session_ctx is not None:
             try:
@@ -513,5 +586,10 @@ class GeminiLiveHandler:
                 self._session_closed = True
                 self._session = None
                 self._session_ctx = None
-
+        
+        tracer.record_event(
+            "gemini_session_closed",
+            tenant_id=self.tenant_id,
+            metadata={"model": settings.gemini_model},
+        )
         log.info("gemini_session_closed")

@@ -1,25 +1,33 @@
 
 
-from __future__ import annotations 
+from __future__ import annotations
+
+import time
+import uuid
 
 import structlog
 from qdrant_client import QdrantClient
-from qdrant_client.models import ( 
+from qdrant_client.models import (
     Distance,
-    VectorParams,
-    PointStruct,
-    Filter,
     FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
     Range,
-    SearchParams,
-    ScoredPoint,
+    VectorParams,
 )
 
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag.embedder import VECTOR_DIM
 from voice_commerce.models.product import Product
+from voice_commerce.observability.metrics import observe_qdrant_query, observe_qdrant_upsert
 
 log = structlog.get_logger(__name__)
+
+
+def _point_id_for_tenant_product(tenant_id: str, product_id: int) -> str:
+    """Build one deterministic Qdrant-safe point ID per tenant/product pair."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"voice-commerce:{tenant_id}:{product_id}"))
 
 class VectorStore:
     """
@@ -27,11 +35,30 @@ class VectorStore:
     One instance created at startup in main.py lifespan, stored on app.state.
     """
     def __init__(self) -> None:
-        # ":memory:" creates an in-process Qdrant — no network, no files.
-        self._client = QdrantClient(":memory:")
+        self._client = self._create_client()
         self._collection = settings.qdrant_collection
         self._ensure_collection()
-        log.info("vector_store_ready", collection=self._collection, dim=VECTOR_DIM)
+        log.info(
+            "vector_store_ready",
+            collection=self._collection,
+            dim=VECTOR_DIM,
+            mode=settings.qdrant_mode,
+        )
+
+    @staticmethod
+    def _create_client() -> QdrantClient:
+        """Build the Qdrant client from the current app settings."""
+        if settings.qdrant_uses_server:
+            log.info(
+                "vector_store_connecting_qdrant_server",
+                host=settings.qdrant_host,
+                port=settings.qdrant_port,
+            )
+            return QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+
+        # ":memory:" creates an in-process Qdrant for simple local development.
+        log.info("vector_store_using_in_memory_qdrant")
+        return QdrantClient(":memory:")
 
     def _ensure_collection(self) -> None:
         """
@@ -58,7 +85,13 @@ class VectorStore:
             log.info("vector_store_collection_created",
                      collection=self._collection, dim=VECTOR_DIM)
 
-    def upsert(self, products: list[Product], vectors: list[list[float]]) -> int:
+    def upsert(
+        self,
+        products: list[Product],
+        vectors: list[list[float]],
+        *,
+        tenant_id: str,
+    ) -> int:
         """
         Store or update product vectors in Qdrant.
  
@@ -83,29 +116,35 @@ class VectorStore:
         
         assert len(products) == len(vectors), "products and vectors must have equal length"
 
+        started_at = time.perf_counter()
         points = []
-        for product, vector in zip(products, vectors):
+        for product, vector in zip(products, vectors, strict=True):
+            payload = product.model_dump()
+            payload["tenant_id"] = tenant_id
             points.append(
                 PointStruct(
-                    id=product.id, # WooCommerce integer ID
+                    id=_point_id_for_tenant_product(tenant_id, product.id),
                     vector=vector,
-                    # We store the ENTIRE Pydantic model as a dictionary cache
-                    payload=product.model_dump(),
-                    # payload={              # stored alongside vector, returned in search results
-                    # "id":          product.id,
-                    # "name":        product.name,
-                    # "price":       product.price,
-                    # "stock":       product.stock_quantity,
-                    # "description": product.description,
-                    # "categories":  product.categories,
-                    # "tags":        product.tags,
-                    # "sku":         product.sku,
-                    # "permalink":   product.permalink,
-                    # },
+                    payload=payload,
                 )
             )
-        self._client.upsert(collection_name=self._collection, points=points, wait=True)
-        log.info("vector_store_upserted", count=len(points))
+        try:
+            self._client.upsert(collection_name=self._collection, points=points, wait=True)
+        except Exception:
+            observe_qdrant_upsert(
+                tenant_id,
+                time.perf_counter() - started_at,
+                status="error",
+                point_count=0,
+            )
+            raise
+        observe_qdrant_upsert(
+            tenant_id,
+            time.perf_counter() - started_at,
+            status="success",
+            point_count=len(points),
+        )
+        log.info("vector_store_upserted", count=len(points), tenant_id=tenant_id)
         return len(points)
 
 
@@ -116,6 +155,7 @@ class VectorStore:
         limit: int = 5,
         offset: int = 0,
         max_price: float | None = None,
+        tenant_id: str = "demo",
     ) -> list[Product]:
         """
         Find the top-k most similar product vectors to the query vector.
@@ -140,32 +180,47 @@ class VectorStore:
           Raise to 0.4-0.5 if you get too many irrelevant results.
           Lower to 0.2 if you get too few results on edge-case queries.
         """
-        query_filter = None
-        # ── DATABASE-LEVEL FILTERING ─────────────────────────────────────────
+        must_conditions = [FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))]
         if max_price is not None:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(key="price", range=Range(lte=max_price))
-                ]
-            )
-        
-        results = self._client.query_points(
-            collection_name=self._collection,
-            query=query_vector,
-            limit=limit,
-            offset=max(0, offset),
-            query_filter=query_filter,
-            score_threshold=0.45,
-        ).points
+            must_conditions.append(FieldCondition(key="price", range=Range(lte=max_price)))
+        query_filter = Filter(must=must_conditions)
+
+        started_at = time.perf_counter()
+        try:
+            results = self._client.query_points(
+                collection_name=self._collection,
+                query=query_vector,
+                limit=limit,
+                offset=max(0, offset),
+                query_filter=query_filter,
+                score_threshold=0.45,
+            ).points
+        except Exception:
+            observe_qdrant_query(tenant_id, time.perf_counter() - started_at, status="error")
+            raise
+        observe_qdrant_query(tenant_id, time.perf_counter() - started_at, status="success")
         log.debug("vector_store_search", results=len(results))
         # Re-hydrate the results back into our beautiful Pydantic objects
-        return [Product(**hit.payload) for hit in results if hit.payload]
+        return [
+            Product(**{key: value for key, value in hit.payload.items() if key != "tenant_id"})
+            for hit in results
+            if hit.payload
+        ]
     
     @property
     def count(self) -> int:
         """Number of product vectors currently stored."""
         info = self._client.get_collection(self._collection)
         return info.points_count or 0
+
+    def count_for_tenant(self, tenant_id: str) -> int:
+        """Number of indexed product vectors for one tenant."""
+        return self._client.count(
+            collection_name=self._collection,
+            count_filter=Filter(
+                must=[FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))]
+            ),
+        ).count
 
 
 

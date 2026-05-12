@@ -5,11 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncpg==0.31.0",
     "fastapi==0.135.1",
     "google-genai==1.68.0",
+    "langfuse==4.6.1",
     "pandas==3.0.2",
     "pydantic==2.12.5",
     "pydantic-settings==2.13.1",
+    "prometheus-client==0.25.0",
     "qdrant-client==1.17.1",
     "rapidfuzz==3.14.5",
     "sentence-transformers==5.3.0",
@@ -35,6 +38,9 @@ packages = ["src/voice_commerce"]
 asyncio_mode = "auto"
 testpaths    = ["tests"]
 pythonpath   = ["src"]
+markers = [
+    "integration: tests that hit real external services",
+]
 
 
 [tool.ruff]

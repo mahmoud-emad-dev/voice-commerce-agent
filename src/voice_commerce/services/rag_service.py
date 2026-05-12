@@ -22,9 +22,10 @@ SINGLETON PATTERN:
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import time
-from typing import Any, TypeAlias, TypedDict
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any, TypedDict
 
 import structlog
 
@@ -32,8 +33,10 @@ from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.retriever import Retriever
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
-
-from voice_commerce.services.csv_client import get_client
+from voice_commerce.observability.metrics import observe_embedding, observe_rag_search
+from voice_commerce.observability.tracing import get_tracer
+from voice_commerce.services.csv_client import get_client_for_tenant, initialize_tenant_client
+from voice_commerce.services.tenant_service import get_tenant_service
 
 log = structlog.get_logger()
 
@@ -65,15 +68,26 @@ class CategorySummaryEntry(TypedDict):
     parent_groups: list[str]
 
 
-CategorySummary: TypeAlias = dict[str, CategorySummaryEntry]
-ProductsByCategory: TypeAlias = dict[str, list[CategoryProductSnapshot]]
-CategoryLookup: TypeAlias = dict[str, str]
+type CategorySummary = dict[str, CategorySummaryEntry]
+type ProductsByCategory = dict[str, list[CategoryProductSnapshot]]
+type CategoryLookup = dict[str, str]
+
+
+@dataclass
+class TenantCatalogState:
+    product_lookup: dict[int, Product] = field(default_factory=dict)
+    category_summary: CategorySummary = field(default_factory=dict)
+    products_by_category: ProductsByCategory = field(default_factory=dict)
+    category_lookup: CategoryLookup = field(default_factory=dict)
+    sync_complete: bool = False
+    products_indexed: int = 0
+    last_error: str | None = None
 
 # ── Module-level singleton ────────────────────────────────────────────────────
-_service_instance: "RagService | None" = None
+_service_instance: RagService | None = None
 
 
-def get_rag_service() -> "RagService":
+def get_rag_service() -> RagService:
     """
     Return the global RagService singleton, creating it if needed.
     """
@@ -92,12 +106,17 @@ class RagService:
     def __init__(self) -> None:
         self.v_store = VectorStore()
         self.retriever = Retriever(self.v_store)
-        self._sync_complete = False
-        self._products_indexed = 0
-        self._product_lookup: dict[int, Product] = {}
-        self._category_summary: CategorySummary = {}
-        self._products_by_category: ProductsByCategory = {}
-        self._category_lookup: CategoryLookup = {}
+        self._tenant_states: dict[str, TenantCatalogState] = {}
+
+    @staticmethod
+    def _resolved_tenant_id(tenant_id: str | None = None) -> str:
+        return str(tenant_id or "demo").strip() or "demo"
+
+    def _get_tenant_state(self, tenant_id: str | None = None) -> TenantCatalogState:
+        return self._tenant_states.setdefault(
+            self._resolved_tenant_id(tenant_id),
+            TenantCatalogState(),
+        )
 
     @staticmethod
     def _normalize_category_key(value: str) -> str:
@@ -241,30 +260,37 @@ class RagService:
     @property
     def category_summary(self) -> CategorySummary:
         """Safe read access to category summary metadata."""
+        return self.get_category_summary()
+
+    def get_category_summary(self, tenant_id: str | None = None) -> CategorySummary:
+        """Safe read access to category summary metadata for one tenant."""
+        state = self._get_tenant_state(tenant_id)
         return {
             name: self._copy_category_summary_entry(data)
-            for name, data in self._category_summary.items()
+            for name, data in state.category_summary.items()
         }
 
     @property
     def products_by_category(self) -> ProductsByCategory:
         """Safe read access to grouped slim product snapshots."""
+        state = self._get_tenant_state()
         return {
             name: [self._copy_product_snapshot(item) for item in items]
-            for name, items in self._products_by_category.items()
+            for name, items in state.products_by_category.items()
         }
 
-    def list_categories(self) -> list[str]:
+    def list_categories(self, tenant_id: str | None = None) -> list[str]:
         """Return known leaf categories sorted by descending product count."""
+        state = self._get_tenant_state(tenant_id)
         return [
             name
             for name, _ in sorted(
-                self._category_summary.items(),
+                state.category_summary.items(),
                 key=lambda pair: (-int(pair[1].get("count", 0)), pair[0].lower()),
             )
         ]
 
-    def resolve_category_name(self, category: str) -> str | None:
+    def resolve_category_name(self, category: str, tenant_id: str | None = None) -> str | None:
         """
         Resolve a user-provided category to a known leaf category.
 
@@ -274,13 +300,14 @@ class RagService:
         if not normalized_category:
             return None
 
-        exact_match = self._category_lookup.get(normalized_category)
+        state = self._get_tenant_state(tenant_id)
+        exact_match = state.category_lookup.get(normalized_category)
         if exact_match:
             return exact_match
 
         contains_matches = [
             category_name
-            for category_name in self.list_categories()
+            for category_name in self.list_categories(tenant_id)
             if normalized_category in self._normalize_category_key(category_name)
         ]
         if len(contains_matches) == 1:
@@ -454,13 +481,16 @@ class RagService:
         )
 
     def search_category_summaries(
-        self, keyword: str | None = None
+        self,
+        keyword: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[tuple[str, CategorySummaryEntry]]:
         """Return category summaries sorted by descending count, optionally filtered by keyword."""
         normalized_keyword = self._normalize_category_key(keyword or "")
         matches: list[tuple[str, CategorySummaryEntry]] = []
+        state = self._get_tenant_state(tenant_id)
 
-        for category_name, summary in self._category_summary.items():
+        for category_name, summary in state.category_summary.items():
             haystacks = [
                 self._normalize_category_key(category_name),
                 *[self._normalize_category_key(name) for name in summary.get("subcategories", [])],
@@ -475,6 +505,7 @@ class RagService:
     def get_products_for_category(
         self,
         category: str,
+        tenant_id: str | None = None,
         *,
         max_price: float | None = None,
         in_stock_only: bool = False,
@@ -484,13 +515,14 @@ class RagService:
         """
         Internal deterministic retrieval helper for browse/category-constrained retrieval.
         """
-        resolved_category = self.resolve_category_name(category)
+        resolved_category = self.resolve_category_name(category, tenant_id)
         if not resolved_category:
             return []
 
+        state = self._get_tenant_state(tenant_id)
         items = [
             self._copy_product_snapshot(item)
-            for item in self._products_by_category.get(resolved_category, [])
+            for item in state.products_by_category.get(resolved_category, [])
         ]
         if max_price is not None:
             items = [item for item in items if item["price"] <= max_price]
@@ -506,6 +538,7 @@ class RagService:
     def _get_full_products_for_category(
         self,
         category: str,
+        tenant_id: str | None = None,
         *,
         max_price: float | None = None,
         in_stock_only: bool = False,
@@ -515,17 +548,105 @@ class RagService:
         """Return full Product models for one resolved category using the cached catalog."""
         snapshots = self.get_products_for_category(
             category,
+            tenant_id,
             max_price=max_price,
             in_stock_only=in_stock_only,
             limit=limit,
             offset=offset,
         )
+        state = self._get_tenant_state(tenant_id)
         products: list[Product] = []
         for item in snapshots:
-            product = self._product_lookup.get(int(item["id"]))
+            product = state.product_lookup.get(int(item["id"]))
             if product is not None:
                 products.append(product)
         return products
+
+    async def _sync_tenant_catalog(self, tenant_id: str, catalog_path: str) -> int:
+        state = self._get_tenant_state(tenant_id)
+        log.info(
+            "rag_tenant_sync_fetching_products",
+            tenant_id=tenant_id,
+            catalog_path=catalog_path,
+        )
+
+        try:
+            await initialize_tenant_client(tenant_id, catalog_path)
+            store_client = get_client_for_tenant(tenant_id)
+            all_products = await store_client.list_all_products()
+            all_products = [
+                p
+                for p in all_products
+                if "women" not in p.name.lower()
+                and not any("women" in c.name.lower() for c in p.categories)
+                and not any("women" in t.name.lower() for t in getattr(p, "tags", []))
+            ]
+        except Exception as e:
+            state.last_error = str(e)
+            state.sync_complete = False
+            log.exception("rag_sync_catalog_load_error", tenant_id=tenant_id, error=str(e))
+            return 0
+
+        if not all_products:
+            state.product_lookup = {}
+            state.category_summary = {}
+            state.products_by_category = {}
+            state.category_lookup = {}
+            state.sync_complete = True
+            state.products_indexed = 0
+            state.last_error = None
+            log.warning("rag_sync_no_products", tenant_id=tenant_id)
+            return 0
+
+        state.product_lookup = {product.id: product for product in all_products}
+        state.category_summary, state.products_by_category, state.category_lookup = (
+            self._build_category_indexes(all_products)
+        )
+        log.info(
+            "rag_category_caches_ready",
+            tenant_id=tenant_id,
+            category_count=len(state.category_summary),
+            grouped_category_count=len(state.products_by_category),
+            sample_categories=list(state.category_summary.keys())[:],
+        )
+
+        texts = [p.to_embedding_text() for p in all_products]
+        embed_started_at = time.perf_counter()
+        try:
+            loop = asyncio.get_running_loop()
+            vectors = await loop.run_in_executor(None, lambda: embedder.embed_batch(texts))
+        except Exception as e:
+            observe_embedding(
+                "catalog_sync",
+                time.perf_counter() - embed_started_at,
+                status="error",
+            )
+            state.last_error = str(e)
+            state.sync_complete = False
+            log.error("rag_sync_embed_error", tenant_id=tenant_id, error=str(e))
+            return 0
+        observe_embedding(
+            "catalog_sync",
+            time.perf_counter() - embed_started_at,
+            status="success",
+        )
+
+        try:
+            indexed_products = self.v_store.upsert(all_products, vectors, tenant_id=tenant_id)
+        except Exception as e:
+            state.last_error = str(e)
+            state.sync_complete = False
+            log.error("rag_sync_upsert_error", tenant_id=tenant_id, error=str(e))
+            return 0
+
+        state.sync_complete = True
+        state.products_indexed = indexed_products
+        state.last_error = None
+        return indexed_products
+
+    async def sync_tenant_catalog(self, tenant_id: str, catalog_path: str) -> int:
+        """Sync one tenant catalog on demand after tenant creation or config changes."""
+        return await self._sync_tenant_catalog(tenant_id, catalog_path)
 
     # ── Catalog sync ──────────────────────────────────────────────────────────
     async def sync_catalog(self) -> int:
@@ -536,67 +657,19 @@ class RagService:
         log.info("rag_sync_starting")
         t0 = time.perf_counter()
 
-        # 1. Fetch all products from WooCommerce
-        log.info("rag_sync_fetching_products")
-        try:
-            wc_client = get_client()
-            all_products = await wc_client.list_all_products()
-            # Exclude any products designated as 'women' (in name, categories, tags)
-            all_products = [
-                p for p in all_products 
-                if "women" not in p.name.lower() 
-                and not any("women" in c.name.lower() for c in p.categories)
-                and not any("women" in t.name.lower() for t in getattr(p, "tags", []))
-            ]
-        except Exception as e:
-            log.exception("rag_sync_woocommerce_error", error=str(e))
-            return 0
-
-        if not all_products:
-            log.warning("rag_sync_no_products")
-            return 0
-
-        self._product_lookup = {product.id: product for product in all_products}
-
-        # 1.5 Build category intelligence caches for prompt/context and deterministic retrieval.
-        self._category_summary, self._products_by_category, self._category_lookup = (
-            self._build_category_indexes(all_products)
-        )
-        log.info(
-            "rag_category_caches_ready",
-            category_count=len(self._category_summary),
-            grouped_category_count=len(self._products_by_category),
-            sample_categories=list(self._category_summary.keys())[:],
-        )
-
-        log.info("rag_sync_building_texts", count=len(all_products))
-
-        # 2. Build embedding texts
-        texts = [p.to_embedding_text() for p in all_products]
-
-        # 3. Embed ALL texts in a background thread (Prevents server freezing!)
-        try:
-            loop = asyncio.get_running_loop()
-            vectors = await loop.run_in_executor(None, lambda: embedder.embed_batch(texts))
-        except Exception as e:
-            log.error("rag_sync_embed_error", error=str(e))
-            return 0
-        log.info("rag_sync_embedding_done", count=len(vectors))
-
-        # 4. Upsert to Qdrant (We removed Claude's manual dicts, we just pass lists!)
-        try:
-            indexed_products = self.v_store.upsert(all_products, vectors)
-        except Exception as e:
-            log.error("rag_sync_upsert_error", error=str(e))
-            return 0
+        tenant_service = get_tenant_service()
+        tenants = [tenant for tenant in await tenant_service.list_tenants() if tenant.is_active]
+        indexed_products = 0
+        for tenant in tenants:
+            tenant_count = await self._sync_tenant_catalog(tenant.tenant_id, tenant.catalog_path)
+            indexed_products += tenant_count
 
         elapsed = time.perf_counter() - t0
-        self._sync_complete = True
-        self._products_indexed = indexed_products
 
         log.info(
             "rag_catalog_sync_complete",
             indexed=indexed_products,
+            tenant_count=len(tenants),
             seconds=round(elapsed, 2),
         )
         return indexed_products
@@ -609,21 +682,31 @@ class RagService:
         offset: int = 0,
         max_price: float | None = None,
         category: str | None = None,
+        tenant_id: str = "demo",
     ) -> list[Product]:
         """
         Semantic product search. Runs on every user voice command.
         Embed query and find most similar products using Qdrant.
         """
+        search_started_at = time.perf_counter()
 
         # Fallback if someone speaks before the server finishes booting
-        if not self._sync_complete:
+        state = self._get_tenant_state(tenant_id)
+        if not state.sync_complete:
             log.warning("rag_search_collection_not_ready_yet")
+            observe_rag_search(
+                tenant_id,
+                time.perf_counter() - search_started_at,
+                status="not_ready",
+                result_count=0,
+            )
             return []
 
         strict_category = self._strict_category_for_query(query)
         if strict_category and not category:
             category_results = self._get_full_products_for_category(
                 strict_category,
+                tenant_id,
                 max_price=max_price,
                 in_stock_only=False,
                 limit=max(limit, 25),
@@ -639,6 +722,20 @@ class RagService:
                     available=len(category_results),
                     returned=len(sorted_results),
                 )
+                observe_rag_search(
+                    tenant_id,
+                    time.perf_counter() - search_started_at,
+                    status="success",
+                    result_count=len(sorted_results),
+                )
+                get_tracer().record_observation(
+                    "rag_search",
+                    as_type="retriever",
+                    tenant_id=tenant_id,
+                    input_payload=query,
+                    output_payload={"result_count": len(sorted_results)},
+                    metadata={"category": strict_category, "strategy": "strict_category"},
+                )
                 return sorted_results
 
         # Run CPU-bound embedding in thread pool so it doesn't interrupt audio streams
@@ -652,21 +749,35 @@ class RagService:
                     limit=retrieval_limit,
                     offset=max(0, offset),
                     max_price=max_price,
+                    tenant_id=tenant_id,
                 ),
             )
         except Exception as e:
             log.exception("rag_search_error", query=query[:80], error=str(e))
+            observe_rag_search(
+                tenant_id,
+                time.perf_counter() - search_started_at,
+                status="error",
+                result_count=0,
+            )
             return []
 
         if category:
-            resolved_category = self.resolve_category_name(category)
+            resolved_category = self.resolve_category_name(category, tenant_id)
             if not resolved_category:
+                observe_rag_search(
+                    tenant_id,
+                    time.perf_counter() - search_started_at,
+                    status="category_not_found",
+                    result_count=0,
+                )
                 return []
 
             allowed_ids = {
                 item["id"]
                 for item in self.get_products_for_category(
                     resolved_category,
+                    tenant_id,
                     max_price=max_price,
                     in_stock_only=False,
                 )
@@ -688,22 +799,48 @@ class RagService:
                 search_results = constrained_results
 
         reranked_results = self._rerank_products_for_query(query, search_results)
-        return self._sort_products_by_price(reranked_results[:limit])
+        final_results = self._sort_products_by_price(reranked_results[:limit])
+        observe_rag_search(
+            tenant_id,
+            time.perf_counter() - search_started_at,
+            status="success",
+            result_count=len(final_results),
+        )
+        get_tracer().record_observation(
+            "rag_search",
+            as_type="retriever",
+            tenant_id=tenant_id,
+            input_payload=query,
+            output_payload={"result_count": len(final_results)},
+            metadata={"category": category, "max_price": max_price},
+        )
+        return final_results
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     @property
     def is_ready(self) -> bool:
         """True when catalog has been synced at least once."""
-        return self._sync_complete
+        return self._get_tenant_state().sync_complete
 
     def stats(self) -> dict[str, Any]:
         """Return current sync status and indexed product count."""
+        demo_state = self._get_tenant_state()
         return {
-            "sync_complete": self._sync_complete,
-            "products_indexed": self._products_indexed,
+            "sync_complete": demo_state.sync_complete,
+            "products_indexed": demo_state.products_indexed,
             "qdrant_count": self.v_store.count,
-            "category_count": len(self._category_summary),
+            "category_count": len(demo_state.category_summary),
             "embedder_ready": embedder.is_ready(),
             "embedder_error": embedder.last_error(),
+            "tenants": {
+                tenant_id: {
+                    "sync_complete": state.sync_complete,
+                    "products_indexed": state.products_indexed,
+                    "qdrant_count": self.v_store.count_for_tenant(tenant_id),
+                    "category_count": len(state.category_summary),
+                    "last_error": state.last_error,
+                }
+                for tenant_id, state in sorted(self._tenant_states.items())
+            },
         }

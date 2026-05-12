@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 import random
 import string
+from datetime import datetime
 from typing import Literal
 
 import structlog
@@ -155,9 +155,13 @@ def _serialize_state(state: CheckoutState, *, demo_notice: str | None = None) ->
     }
 
 
-def invalidate_checkout_if_cart_changed(session_id: str, browser_items: list[dict]) -> bool:
+def invalidate_checkout_if_cart_changed(
+    session_id: str,
+    browser_items: list[dict],
+    tenant_id: str | None = None,
+) -> bool:
     """Close an active checkout if the browser cart no longer matches it."""
-    state = get_checkout(session_id)
+    state = get_checkout(session_id, tenant_id)
     if state is None or not state.is_open:
         return False
 
@@ -166,15 +170,15 @@ def invalidate_checkout_if_cart_changed(session_id: str, browser_items: list[dic
     if old_snapshot == new_snapshot:
         return False
 
-    clear_checkout(session_id)
+    clear_checkout(session_id, tenant_id)
     return True
 
 
-async def begin_checkout(session_id: str = "default") -> ToolResponse:
+async def begin_checkout(session_id: str = "default", tenant_id: str | None = None) -> ToolResponse:
     """Open a fresh demo checkout from the current in-memory cart."""
-    cart = cart_tools.get_cart(session_id)
+    cart = cart_tools.get_cart(session_id, tenant_id)
     if cart.is_empty():
-        clear_checkout(session_id)
+        clear_checkout(session_id, tenant_id)
         return ToolResponse.error(
             "Your cart is empty. Add something first, then I can start checkout."
         )
@@ -186,7 +190,7 @@ async def begin_checkout(session_id: str = "default") -> ToolResponse:
         cart_snapshot=_snapshot_from_cart(cart),
     )
     state.totals = _compute_totals(state.cart_snapshot)
-    set_checkout(state)
+    set_checkout(state, tenant_id)
 
     return ToolResponse.success(
         ai_text=(
@@ -204,9 +208,10 @@ async def set_checkout_option(
     field: Literal["shipping", "payment"],
     value: str,
     session_id: str = "default",
+    tenant_id: str | None = None,
 ) -> ToolResponse:
     """Apply one checkout choice and advance the demo flow to the next step."""
-    state = get_checkout(session_id)
+    state = get_checkout(session_id, tenant_id)
     if state is None or not state.is_open:
         return ToolResponse.error("Checkout is not active yet. Say checkout when you're ready.")
 
@@ -217,10 +222,11 @@ async def set_checkout_option(
         state.shipping = normalized  # type: ignore[assignment]
         state.totals = _compute_totals(state.cart_snapshot, state.shipping)
         state.step = "payment"
-        set_checkout(state)
+        set_checkout(state, tenant_id)
         return ToolResponse.success(
             ai_text=(
-                f"{_shipping_summary(state.shipping)} is set. For payment, would you like card or PayPal?"
+                f"{_shipping_summary(state.shipping)} is set. "
+                "For payment, would you like card or PayPal?"
             ),
             data=_serialize_state(state),
         )
@@ -232,19 +238,23 @@ async def set_checkout_option(
 
     state.payment = normalized  # type: ignore[assignment]
     state.step = "confirm"
-    set_checkout(state)
+    set_checkout(state, tenant_id)
     return ToolResponse.success(
         ai_text=(
-            f"Great. Your demo total is ${state.totals['total']:.2f} with {_payment_summary(state.payment)}. "
+            f"Great. Your demo total is ${state.totals['total']:.2f} "
+            f"with {_payment_summary(state.payment)}. "
             'Say "place order" to confirm.'
         ),
         data=_serialize_state(state),
     )
 
 
-async def confirm_checkout(session_id: str = "default") -> ToolResponse:
+async def confirm_checkout(
+    session_id: str = "default",
+    tenant_id: str | None = None,
+) -> ToolResponse:
     """Finalize the demo checkout and clear the shadow cart."""
-    state = get_checkout(session_id)
+    state = get_checkout(session_id, tenant_id)
     if state is None or not state.is_open:
         return ToolResponse.error("Checkout is not active yet.")
     if state.shipping is None or state.payment is None:
@@ -255,8 +265,8 @@ async def confirm_checkout(session_id: str = "default") -> ToolResponse:
     state.order_id = _generate_order_id()
     state.step = "success"
     state.totals = _compute_totals(state.cart_snapshot, state.shipping)
-    set_checkout(state)
-    cart_tools.clear_cart(session_id)
+    set_checkout(state, tenant_id)
+    cart_tools.clear_cart(session_id, tenant_id)
 
     return ToolResponse.success(
         ai_text=(
@@ -269,9 +279,12 @@ async def confirm_checkout(session_id: str = "default") -> ToolResponse:
     )
 
 
-async def cancel_checkout(session_id: str = "default") -> ToolResponse:
+async def cancel_checkout(
+    session_id: str = "default",
+    tenant_id: str | None = None,
+) -> ToolResponse:
     """Close the current demo checkout without changing the cart contents."""
-    state = get_checkout(session_id)
+    state = get_checkout(session_id, tenant_id)
     if state is None:
         return ToolResponse.success(
             ai_text="Checkout is already closed.",
@@ -279,8 +292,8 @@ async def cancel_checkout(session_id: str = "default") -> ToolResponse:
         )
 
     state.step = "cancelled"
-    set_checkout(state)
-    clear_checkout(session_id)
+    set_checkout(state, tenant_id)
+    clear_checkout(session_id, tenant_id)
     return ToolResponse.success(
         ai_text="Checkout closed. Your cart is still there whenever you're ready.",
         data={"checkout_closed": True},

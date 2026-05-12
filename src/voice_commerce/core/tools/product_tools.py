@@ -16,17 +16,19 @@
 # =============================================================================
 
 from __future__ import annotations
+
 import hashlib
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import structlog
-from voice_commerce.services.csv_client import get_client
+
+from voice_commerce.models.tool_response import ToolResponse
+from voice_commerce.services.csv_client import get_client_for_tenant
 from voice_commerce.services.rag_service import (
     CategoryProductSnapshot,
     CategorySummaryEntry,
     get_rag_service,
 )
-from voice_commerce.models.tool_response import ToolResponse
 
 log = structlog.get_logger(__name__)
 
@@ -43,6 +45,10 @@ class _SearchQueryCacheEntry(TypedDict):
 _SEARCH_RESULT_CACHE: dict[str, dict[str, _SearchQueryCacheEntry]] = {}
 
 
+def _scoped_session_key(session_id: str, tenant_id: str | None = None) -> str:
+    return f"{tenant_id or 'demo'}:{session_id}"
+
+
 def _query_cache_key(query: str, max_price: float | None, category: str | None) -> str:
     canonical = (
         f"{query.strip().lower()}|"
@@ -52,8 +58,11 @@ def _query_cache_key(query: str, max_price: float | None, category: str | None) 
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()
 
 
-def _ensure_session_cache(session_id: str) -> dict[str, _SearchQueryCacheEntry]:
-    cache = _SEARCH_RESULT_CACHE.setdefault(session_id, {})
+def _ensure_session_cache(
+    session_id: str,
+    tenant_id: str | None = None,
+) -> dict[str, _SearchQueryCacheEntry]:
+    cache = _SEARCH_RESULT_CACHE.setdefault(_scoped_session_key(session_id, tenant_id), {})
     if len(cache) >= _MAX_QUERIES_PER_SESSION:
         oldest_key = next(iter(cache))
         cache.pop(oldest_key, None)
@@ -78,6 +87,7 @@ async def search_products(
     limit: int = _DEFAULT_PAGE_SIZE,
     offset: int = 0,
     session_id: str = "default",
+    tenant_id: str | None = None,
 ) -> ToolResponse:
     """
     Search the product catalog for items matching a natural language query.
@@ -101,6 +111,7 @@ async def search_products(
         limit=requested_limit,
         offset=requested_offset,
         session_id=session_id,
+        tenant_id=tenant_id or "demo",
     )
 
     try:
@@ -109,11 +120,12 @@ async def search_products(
         if not rag.is_ready:
             log.warning("search_attempted_while_rag_syncing")
             return ToolResponse.error(
-                "I am currently updating my catalog database. Please give me a few seconds and try your search again."
+                "I am currently updating my catalog database. "
+                "Please give me a few seconds and try your search again."
             )
         # 1. Resolve cursor state for this session/query.
-        session_cache = _ensure_session_cache(session_id)
-        resolved_category = rag.resolve_category_name(category) if category else None
+        session_cache = _ensure_session_cache(session_id, tenant_id)
+        resolved_category = rag.resolve_category_name(category, tenant_id) if category else None
         cache_key = _query_cache_key(query, max_price, resolved_category)
         cache_entry = session_cache.get(cache_key)
         seen_ids = set(cache_entry["returned_ids"]) if cache_entry else set()
@@ -131,6 +143,7 @@ async def search_products(
                 offset=rolling_offset,
                 max_price=max_price,
                 category=resolved_category,
+                tenant_id=tenant_id or "demo",
             )
             if not batch:
                 break
@@ -205,7 +218,11 @@ async def search_products(
         )
 
 
-async def get_product_details(product_id: int, session_id: str = "default") -> ToolResponse:
+async def get_product_details(
+    product_id: int,
+    session_id: str = "default",
+    tenant_id: str | None = None,
+) -> ToolResponse:
     """
     Return full details for a specific product by its ID.
 
@@ -216,9 +233,9 @@ async def get_product_details(product_id: int, session_id: str = "default") -> T
     log.info("get_product_details", product_id=product_id)
 
     try:
-        client = get_client()
+        client = get_client_for_tenant(tenant_id)
         # 1. Fetch live Pydantic Product objects
-        product = await client.get_product(product_id=product_id)  # Live internet search!
+        product = await client.get_product(product_id=product_id)
         if not product:
             return ToolResponse.error(
                 f"I couldn't find product ID {product_id}. "
@@ -254,6 +271,7 @@ async def search_categories(
     limit: int | None = None,
     offset: int = 0,
     session_id: str = "default",
+    tenant_id: str | None = None,
 ) -> ToolResponse:
     """
     Browse catalog by category.
@@ -280,12 +298,12 @@ async def search_categories(
                 "I am still loading the catalog. Please give me a few seconds and ask again."
             )
 
-        category_summary = rag.category_summary
+        category_summary = rag.get_category_summary(tenant_id)
         if not category_summary:
             return ToolResponse.error("I don't have any category information loaded right now.")
 
         if not category:
-            sorted_categories = rag.search_category_summaries()
+            sorted_categories = rag.search_category_summaries(tenant_id=tenant_id)
             effective_limit = safe_limit or 12
             preview_items = sorted_categories[safe_offset : safe_offset + effective_limit]
             lines = ["Categories available:"]
@@ -322,20 +340,23 @@ async def search_categories(
                 },
             )
 
-        resolved_category = rag.resolve_category_name(category)
+        resolved_category = rag.resolve_category_name(category, tenant_id)
         if not resolved_category:
             return ToolResponse.error(
-                f"I couldn't find a category called '{category}'. Ask me what categories we carry for the full list."
+                f"I couldn't find a category called '{category}'. "
+                "Ask me what categories we carry for the full list."
             )
 
         total_items: list[CategoryProductSnapshot] = rag.get_products_for_category(
             resolved_category,
+            tenant_id,
             max_price=max_price,
             in_stock_only=in_stock_only,
         )
         effective_limit = safe_limit or 5
         items: list[CategoryProductSnapshot] = rag.get_products_for_category(
             resolved_category,
+            tenant_id,
             max_price=max_price,
             in_stock_only=in_stock_only,
             limit=effective_limit,
@@ -366,7 +387,8 @@ async def search_categories(
         range_start = safe_offset + 1
         range_end = safe_offset + len(items)
         lines = [
-            f"Found {len(total_items)} products in {resolved_category} (showing {range_start}-{range_end})."
+            f"Found {len(total_items)} products in {resolved_category} "
+            f"(showing {range_start}-{range_end})."
         ]
         if max_price is not None:
             lines.append(f"Price ceiling applied: ${max_price:.2f}.")

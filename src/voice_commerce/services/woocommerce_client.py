@@ -6,7 +6,6 @@ from typing import Any
 import httpx
 import structlog
 
-
 from voice_commerce.config.settings import settings
 from voice_commerce.models.product import Product
 
@@ -16,10 +15,10 @@ log = structlog.get_logger(__name__)
 # Module-level reference to the initialized client singleton.
 # Set by initialize() when main.py starts up.
 # Tools call get_client() to access it.
-_client_instance: "WooCommerceClient | None" = None
+_client_instance: WooCommerceClient | None = None
 
 
-def get_client() -> "WooCommerceClient":
+def get_client() -> WooCommerceClient:
     """
     Return the initialized WooCommerceClient singleton.
 
@@ -58,7 +57,7 @@ class WooCommerceClient:
                 max_connections=10,
             ),
             follow_redirects=True,
-            verify=False,
+            verify=settings.wc_verify_ssl,
         )
 
     # =========================================================================
@@ -67,7 +66,7 @@ class WooCommerceClient:
     # Allows: async with WooCommerceClient() as client: ...
     # Guarantees the httpx client is closed even if exceptions occur
 
-    async def __aenter__(self) -> "WooCommerceClient":
+    async def __aenter__(self) -> WooCommerceClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -293,11 +292,16 @@ class WooCommerceClient:
         try:
             response = await self._http.get(endpoint, params=params)
 
+            try:
+                response_time_ms = round(response.elapsed.total_seconds() * 1000, 1)
+            except RuntimeError:
+                response_time_ms = None
+
             log.debug(
                 "woo_http_response",
                 endpoint=endpoint,
                 status_code=response.status_code,
-                response_time_ms=round(response.elapsed.total_seconds() * 1000, 1),
+                response_time_ms=response_time_ms,
             )
 
             # Raise on HTTP errors (4xx, 5xx)

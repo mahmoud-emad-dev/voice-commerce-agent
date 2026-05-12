@@ -10,8 +10,10 @@ from pydantic import BaseModel
 
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
+from voice_commerce.observability.metrics import set_ready_state
 from voice_commerce.services.rag_service import get_rag_service
-
+from voice_commerce.services.session_state_store import get_session_state_store
+from voice_commerce.services.tenant_service import get_tenant_service
 
 router = APIRouter()
 
@@ -44,7 +46,10 @@ class ReadyResponse(BaseModel):
     "/health",
     response_model=HealthResponse,
     summary="Liveness check",
-    description="Returns 200 if the server process is alive. Used by Docker, load balancers, and monitoring.",
+    description=(
+        "Returns 200 if the server process is alive. "
+        "Used by Docker, load balancers, and monitoring."
+    ),
 )
 async def health_check() -> HealthResponse:
     """Return a lightweight process-level liveness response."""
@@ -65,7 +70,10 @@ async def health_check() -> HealthResponse:
     "/ready",
     response_model=ReadyResponse,
     summary="Readiness check",
-    description="Returns 200 if the server is ready to handle requests. Checks dependencies like Gemini API key.",
+    description=(
+        "Returns 200 if the server is ready to handle requests. "
+        "Checks dependencies like Gemini API key."
+    ),
 )
 async def readiness_check(response: Response) -> ReadyResponse:
     """
@@ -75,11 +83,17 @@ async def readiness_check(response: Response) -> ReadyResponse:
     and the background catalog sync has finished.
     """
     rag = get_rag_service()
+    session_store = get_session_state_store()
+    tenant_service = get_tenant_service()
     checks: dict[str, str] = {}
 
     checks["gemini_configured"] = "ok" if settings.is_gemini_configured else "missing_api_key"
     checks["embedder"] = "ready" if embedder.is_ready() else "warming_up"
     checks["rag_catalog"] = "ready" if rag.is_ready else "syncing"
+    checks["session_store"] = "ready" if session_store.is_ready else "not_ready"
+    checks["tenant_service"] = "ready" if tenant_service.enabled else "disabled"
+    if not settings.postgres_enabled:
+        checks["session_store"] = "disabled"
 
     embedder_error = embedder.last_error()
     if embedder_error:
@@ -88,8 +102,11 @@ async def readiness_check(response: Response) -> ReadyResponse:
         settings.is_gemini_configured
         and embedder.is_ready()
         and rag.is_ready
+        and session_store.is_ready
+        and tenant_service.enabled
         and not embedder_error
     )
+    set_ready_state(is_ready)
     readiness_status = "ready" if is_ready else "not_ready"
     log.debug("readiness_check_called", checks=checks, is_ready=is_ready)
     if not is_ready:

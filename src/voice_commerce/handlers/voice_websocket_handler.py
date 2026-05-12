@@ -14,16 +14,40 @@ import asyncio
 import json
 import re
 import time
+from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
 from fastapi import WebSocket, WebSocketDisconnect
 
 from voice_commerce.config.settings import settings
-from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
-from voice_commerce.core.voice import audio_processor
-from voice_commerce.core.tools import tool_dispatcher, cart_tools, checkout_tools
 from voice_commerce.core.actions.action_dispatcher import ActionDispatcher
+from voice_commerce.core.state.checkout_state import export_checkout_state, restore_checkout_state
+from voice_commerce.core.tools import cart_tools, checkout_tools, tool_dispatcher
+from voice_commerce.core.voice import audio_processor
+from voice_commerce.core.voice.gemini_live_handler import GeminiLiveHandler
+from voice_commerce.observability.logging import (
+    bind_observability_context,
+    clear_observability_context,
+)
+from voice_commerce.observability.metrics import (
+    decrement_active_sessions,
+    increment_active_sessions,
+    observe_audio_input,
+    observe_audio_output,
+    observe_gemini_reconnect,
+    observe_time_to_first_audio,
+    observe_time_to_first_transcript,
+    observe_turn,
+)
+from voice_commerce.observability.tracing import get_tracer
+from voice_commerce.observability.usage import (
+    record_audio_input,
+    record_audio_output,
+    record_text_output,
+)
+from voice_commerce.services.session_state_store import get_session_state_store
 
 log = structlog.get_logger(__name__)
 
@@ -52,6 +76,19 @@ GLOBAL_HANDLES: dict[str, str] = {}  # Stores Google's resumption handles
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 
 
+@dataclass
+class _TurnTimingState:
+    started_at: float
+    input_mode: str
+    first_audio_recorded: bool = False
+    first_transcript_recorded: bool = False
+
+
+def _memory_scope_key(session_id: str, tenant_id: str) -> str:
+    """Keep in-memory transcript and resumption-handle caches isolated per tenant."""
+    return f"{tenant_id}:{session_id}"
+
+
 class VoiceWebSocketHandler:
     """
     Manages one WebSocket session from one browser client.
@@ -67,14 +104,16 @@ class VoiceWebSocketHandler:
         _input_mode   — "text" or "audio"; switches when browser sends binary
     """
 
-    def __init__(self, session_id: str | None = None) -> None:
+    def __init__(self, session_id: str | None = None, tenant_id: str = "demo") -> None:
         """Initialize per-connection state for one browser session."""
         self.session_id = session_id or f"sess_{int(time.time() * 1000)}"
+        self.tenant_id = tenant_id
+        self._memory_key = _memory_scope_key(self.session_id, self.tenant_id)
         # Fetch old memory from the global store, or start a new list if it's a new session
-        if self.session_id not in GLOBAL_SESSIONS:
-            GLOBAL_SESSIONS[self.session_id] = []
-        self._transcript: list[dict[str, str]] = GLOBAL_SESSIONS[self.session_id]
-        self._resumption_handle: str | None = GLOBAL_HANDLES.get(self.session_id)
+        if self._memory_key not in GLOBAL_SESSIONS:
+            GLOBAL_SESSIONS[self._memory_key] = []
+        self._transcript: list[dict[str, str]] = GLOBAL_SESSIONS[self._memory_key]
+        self._resumption_handle: str | None = GLOBAL_HANDLES.get(self._memory_key)
         self._websocket: WebSocket | None = None
         self._gemini: GeminiLiveHandler | None = None
         self._input_mode: str = "text"
@@ -85,7 +124,9 @@ class VoiceWebSocketHandler:
         self._pending_texts_lock = asyncio.Lock()
         self._pending_text_flush_task: asyncio.Task[None] | None = None
         self.action_dispatcher = ActionDispatcher()
-        log.info("voice_handler_created", session_id=self.session_id)
+        self._current_turn: _TurnTimingState | None = None
+        self._active_session_counted = False
+        log.info("voice_handler_created", session_id=self.session_id, tenant_id=self.tenant_id)
 
     @staticmethod
     def _payload_logging_enabled() -> bool:
@@ -220,9 +261,20 @@ class VoiceWebSocketHandler:
         The main entry point for a WebSocket connection.
         Sets up the configs of the WebSocket, opens Gemini, and runs the two communication loops.
         """
-        #  ====== Accept the WebSocket connection and save the reference for later use in helper methods.======
+        # Accept the WebSocket and keep it for the helper send methods.
+        bind_observability_context(tenant_id=self.tenant_id, session_id=self.session_id)
+        tracer = get_tracer()
+        tracer.start_session(
+            self.session_id,
+            self.tenant_id,
+            model=settings.gemini_model,
+            metadata={"app_env": settings.app_env},
+        )
+        increment_active_sessions()
+        self._active_session_counted = True
         await websocket.accept()
         self._websocket = websocket
+        await self._load_persisted_state()
 
         log.info("ws_connected", session_id=self.session_id, client=str(websocket.client))
 
@@ -238,7 +290,9 @@ class VoiceWebSocketHandler:
         try:
             # 2 ====== Open the Gemini Live session ======
             async with GeminiLiveHandler(
-                transcript=self._transcript, resumption_handle=self._resumption_handle
+                transcript=self._transcript,
+                resumption_handle=self._resumption_handle,
+                tenant_id=self.tenant_id,
             ) as gemini:
                 self._gemini = gemini
                 self._pending_text_flush_task = asyncio.create_task(
@@ -275,7 +329,8 @@ class VoiceWebSocketHandler:
                             log.info("triggering_proactive_greeting", session_id=self.session_id)
                             await gemini.send_text(
                                 "--- SYSTEM: The user just connected to the store. "
-                                "Greet them warmly in one short sentence and ask what they are looking for today. ---"
+                                "Greet them warmly in one short sentence and ask what they "
+                                "are looking for today. ---"
                             )
                         except asyncio.CancelledError:
                             log.debug("startup_greeting_cancelled", session_id=self.session_id)
@@ -300,7 +355,7 @@ class VoiceWebSocketHandler:
                         name=f"startup_greeting:{self.session_id}",
                     )
 
-                # 3 ====== Run the two communication tasks concurrently until one raises an exception (e.g. disconnect) ======
+                # Run both communication tasks until one ends or raises.
                 # gather() runs both loops simultaneously.
                 # return_exceptions=False means if one loop crashes, the other is cancelled cleanly.
                 await asyncio.gather(
@@ -322,34 +377,145 @@ class VoiceWebSocketHandler:
                 error_type=type(exc).__name__,
                 exc_info=True,
             )
-            try:
+            with suppress(Exception):
                 await self._send_error(
                     str(exc)
                 )  # Notify browser of the error so it can show a message instead of hanging.
-            except Exception:
-                pass  # WebSocket is already gone
 
         finally:
             if self._startup_greeting_task is not None and not self._startup_greeting_task.done():
                 self._startup_greeting_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await self._startup_greeting_task
-                except asyncio.CancelledError:
-                    pass
             self._startup_greeting_task = None
             if (
                 self._pending_text_flush_task is not None
                 and not self._pending_text_flush_task.done()
             ):
                 self._pending_text_flush_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await self._pending_text_flush_task
-                except asyncio.CancelledError:
-                    pass
             self._pending_text_flush_task = None
             self._gemini = None
+            if self._active_session_counted:
+                decrement_active_sessions()
+                self._active_session_counted = False
+            tracer.finish_session(
+                self.session_id,
+                tenant_id=self.tenant_id,
+                metadata={"total_turns": len(self._transcript)},
+            )
+            tracer.flush()
+            await self._persist_session_state()
             log.info(
                 "ws_handler_finished", session_id=self.session_id, total_turns=len(self._transcript)
+            )
+            clear_observability_context()
+
+    def _ensure_turn_started(self, input_mode: str) -> None:
+        """Start a new timing window for one user turn if none is active yet."""
+        if self._current_turn is None:
+            self._current_turn = _TurnTimingState(
+                started_at=time.perf_counter(),
+                input_mode=input_mode,
+            )
+
+    def _record_first_audio_if_needed(self) -> None:
+        """Record latency to the first Gemini audio chunk for the active turn."""
+        if self._current_turn is None or self._current_turn.first_audio_recorded:
+            return
+        self._current_turn.first_audio_recorded = True
+        observe_time_to_first_audio(
+            self.tenant_id,
+            self._current_turn.input_mode,
+            time.perf_counter() - self._current_turn.started_at,
+            status="success",
+        )
+
+    def _record_first_transcript_if_needed(self) -> None:
+        """Record latency to the first output transcript chunk for the active turn."""
+        if self._current_turn is None or self._current_turn.first_transcript_recorded:
+            return
+        self._current_turn.first_transcript_recorded = True
+        observe_time_to_first_transcript(
+            self.tenant_id,
+            self._current_turn.input_mode,
+            time.perf_counter() - self._current_turn.started_at,
+            status="success",
+        )
+
+    def _complete_current_turn(self, *, status: str) -> None:
+        """Close the active turn timing window and record total duration."""
+        if self._current_turn is None:
+            return
+        observe_turn(
+            self.tenant_id,
+            self._current_turn.input_mode,
+            time.perf_counter() - self._current_turn.started_at,
+            status=status,
+        )
+        self._current_turn = None
+
+    async def _load_persisted_state(self) -> None:
+        """Restore transcript, resumption handle, cart, and checkout from Postgres."""
+        store = get_session_state_store()
+        if not store.enabled:
+            return
+
+        try:
+            saved_state = await store.load_session(self.tenant_id, self.session_id)
+        except Exception as exc:
+            log.warning(
+                "session_state_restore_failed",
+                session_id=self.session_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            return
+
+        if not saved_state:
+            return
+
+        GLOBAL_SESSIONS[self._memory_key] = list(saved_state.get("transcript", []))
+        self._transcript = GLOBAL_SESSIONS[self._memory_key]
+        self._resumption_handle = saved_state.get("resumption_handle")
+        if self._resumption_handle:
+            GLOBAL_HANDLES[self._memory_key] = self._resumption_handle
+        else:
+            GLOBAL_HANDLES.pop(self._memory_key, None)
+
+        cart_tools.restore_cart_state(self.session_id, saved_state.get("cart"), self.tenant_id)
+        restore_checkout_state(self.session_id, saved_state.get("checkout"), self.tenant_id)
+        log.info(
+            "session_state_restored",
+            session_id=self.session_id,
+            tenant_id=self.tenant_id,
+            transcript_turns=len(self._transcript),
+            has_resumption_handle=bool(self._resumption_handle),
+            cart_items=cart_tools.get_cart(self.session_id, self.tenant_id).item_count,
+        )
+
+    async def _persist_session_state(self) -> None:
+        """Write the current session snapshot to Postgres when persistence is enabled."""
+        store = get_session_state_store()
+        if not store.enabled:
+            return
+
+        try:
+            await store.save_session(
+                self.tenant_id,
+                self.session_id,
+                transcript=list(self._transcript),
+                resumption_handle=self._resumption_handle,
+                cart=cart_tools.export_cart_state(self.session_id, self.tenant_id),
+                checkout=export_checkout_state(self.session_id, self.tenant_id),
+            )
+        except Exception as exc:
+            log.warning(
+                "session_state_persist_failed",
+                session_id=self.session_id,
+                error=str(exc),
+                exc_info=True,
             )
 
     # =========================================================================
@@ -373,7 +539,6 @@ class VoiceWebSocketHandler:
                 # Browser closed the connection cleanly
                 raise WebSocketDisconnect(code=message.get("code", 1000))
 
-            # log.info("browser_message_received", message_type=message["type"], session_id=self.session_id )
             raw_bytes: bytes | None = message.get("bytes")
             raw_text: str | None = message.get("text")
 
@@ -394,6 +559,10 @@ class VoiceWebSocketHandler:
                 log.debug(
                     "mic_chunk_received", bytes=len(raw_bytes), session_id=self.session_id
                 )  # for test as temp
+                self._ensure_turn_started("audio")
+                input_seconds = len(raw_bytes) / (audio_processor.MIC_SAMPLE_RATE * 2)
+                observe_audio_input(self.tenant_id, len(raw_bytes), input_seconds)
+                record_audio_input(self.tenant_id, input_seconds, source="audio_stream")
                 # Stream the raw binary straight into Google's ears
                 if gemini.is_connected:
                     await gemini.send_audio_chunk(raw_bytes)
@@ -423,9 +592,15 @@ class VoiceWebSocketHandler:
                     if isinstance(parsed, dict) and parsed.get("type") == "cart_sync":
                         page = parsed.get("page", {})
                         cart_items = parsed.get("cart_items", [])
-                        cart_tools.sync_cart_from_browser(self.session_id, cart_items)
+                        cart_tools.sync_cart_from_browser(
+                            self.session_id,
+                            cart_items,
+                            self.tenant_id,
+                        )
                         if checkout_tools.invalidate_checkout_if_cart_changed(
-                            self.session_id, cart_items
+                            self.session_id,
+                            cart_items,
+                            self.tenant_id,
                         ):
                             await self._send_json({"type": "action", "action": "close_checkout"})
 
@@ -434,24 +609,32 @@ class VoiceWebSocketHandler:
                             products=parsed.get("products", []),
                         )
 
-                        if parsed.get("announce_to_ai") and parsed.get("product_id"):
-                            if gemini.is_connected:
-                                await gemini.send_text(
-                                    "--- SYSTEM: The user added an item to the cart using the page UI. "
-                                    f"Product ID {parsed.get('product_id')} is already in the cart. "
-                                    "Briefly confirm it in one short sentence. Do not call add_to_cart. "
-                                    "Do not ask whether they want to add it. ---"
-                                )
+                        if (
+                            parsed.get("announce_to_ai")
+                            and parsed.get("product_id")
+                            and gemini.is_connected
+                        ):
+                            await gemini.send_text(
+                                "--- SYSTEM: The user added an item to the cart using the page UI. "
+                                f"Product ID {parsed.get('product_id')} is already in the cart. "
+                                "Briefly confirm it in one short sentence. "
+                                "Do not call add_to_cart. "
+                                "Do not ask whether they want to add it. ---"
+                            )
                         continue
 
                     if isinstance(parsed, dict) and parsed.get("type") == "context_update":
                         page = parsed.get("page", {})
                         if "cart_items" in page:
                             cart_tools.sync_cart_from_browser(
-                                self.session_id, page.get("cart_items", [])
+                                self.session_id,
+                                page.get("cart_items", []),
+                                self.tenant_id,
                             )
                             if checkout_tools.invalidate_checkout_if_cart_changed(
-                                self.session_id, page.get("cart_items", [])
+                                self.session_id,
+                                page.get("cart_items", []),
+                                self.tenant_id,
                             ):
                                 await self._send_json(
                                     {"type": "action", "action": "close_checkout"}
@@ -480,6 +663,7 @@ class VoiceWebSocketHandler:
 
                 self._user_started_interaction = True
                 self._input_mode = "text"
+                self._ensure_turn_started("text")
                 log.info(
                     "text_message_received",
                     session_id=self.session_id,
@@ -512,6 +696,7 @@ class VoiceWebSocketHandler:
             We stay in this `async for` loop for the entire conversation.
         """
         ai_transcript_text = ""
+        streamed_text_output = ""
         user_transcript_text = ""
         async for event in gemini.receive_events():
             event_type = event.get("type")
@@ -519,6 +704,10 @@ class VoiceWebSocketHandler:
             # ── 1. AUDIO CHUNK (The AI speaking) ──────────────────────────
             if event_type == MSG_AUDIO:
                 audio_bytes: bytes = event["data"]
+                self._record_first_audio_if_needed()
+                output_seconds = len(audio_bytes) / audio_processor.GEMINI_OUTPUT_BYTES_PER_SECOND
+                observe_audio_output(self.tenant_id, len(audio_bytes), output_seconds)
+                record_audio_output(self.tenant_id, output_seconds, source="audio_stream")
 
                 # Stream the raw audio bytes directly to the browser speakers
                 if audio_processor.is_valid_audio_chunk(audio_bytes):
@@ -537,6 +726,7 @@ class VoiceWebSocketHandler:
                 if not cleaned_output_text:
                     continue
 
+                self._record_first_transcript_if_needed()
                 ai_transcript_text = self._merge_transcript_text(
                     ai_transcript_text, cleaned_output_text
                 )
@@ -581,6 +771,7 @@ class VoiceWebSocketHandler:
                 # THE FIX: Intercept the silent acknowledgment so it doesn't show in the chat UI!
                 if "[SILENT_UPDATE]" in event["text"]:
                     continue
+                streamed_text_output += cleaned_text
                 await self._send_json(
                     {
                         "type": MSG_TEXT,
@@ -593,10 +784,9 @@ class VoiceWebSocketHandler:
                 tool_name = event.get("name", "")
                 tool_args = event.get("args", {})
                 call_id = event.get("call_id")
-                # log.info("tool_call_received",  tool=tool_name, session=self.session_id ,call_id = call_id, args =tool_args )
-
-                # 1. Execute the tool and get the result string AS Execute the python tool using our dispatcher (Returns our strict ToolResponse object!)
+                # Execute the Python tool using the dispatcher and get a ToolResponse.
                 context = tool_dispatcher.ToolContext(session_id=self.session_id)
+                context.tenant_id = self.tenant_id
                 tool_response = await tool_dispatcher.execute(tool_name, tool_args, context)
                 log.info(
                     "tool_call_result",
@@ -615,15 +805,9 @@ class VoiceWebSocketHandler:
                 for action in actions:
                     await self._send_json(action.model_dump())
 
-                # 3. TRAFFIC TO GEMINI AI
-                # Send the result back to Gemini, referencing the call_id so Gemini knows which call this result belongs to
-                # # We format the payload as a dictionary for Gemini
-                # if tool_response.status == "error":
-                #     gemini_payload = {"error": tool_response.ai_text}
-                # else:
-                #     gemini_payload = {"result": tool_response.ai_text}
-                #  temporary we will just send str not dict to gemini as im buildig the send_tool_result to take str nad send str not dict
+                # Send the tool result back to Gemini for this call_id.
                 await gemini.send_tool_result(call_id, tool_name, tool_response.ai_text)
+                await self._persist_session_state()
 
             # # ── 6. INTERRUPT ─────────────────────────────────────────────────
             # elif event_type == "interrupted":
@@ -634,10 +818,12 @@ class VoiceWebSocketHandler:
             elif event_type == "resumption_handle":
                 handle = event.get("handle")
                 if handle is not None:
-                    GLOBAL_HANDLES[self.session_id] = handle
+                    GLOBAL_HANDLES[self._memory_key] = handle
+                    self._resumption_handle = handle
                     log.info(
                         "resumption_handle_received", handle=handle, session_id=self.session_id
                     )
+                    await self._persist_session_state()
                     # Optionally send to frontend so it can be saved
                     # await self._send_json({"type": "resumption_handle", "handle": handle})
 
@@ -646,10 +832,12 @@ class VoiceWebSocketHandler:
                 # One AI response turn finished.
                 # In voice mode: DON'T break — keep looping for the next turn.
                 # Save completed transcript, reset status, re-enable UI.
+                persisted_turn = False
                 if user_transcript_text:
                     full_user_text = user_transcript_text
                     self._transcript.append({"role": "user", "text": full_user_text})
                     user_transcript_text = ""
+                    persisted_turn = True
                     log.debug(
                         "turn_saved user_transcript",
                         length=len(full_user_text),
@@ -660,11 +848,15 @@ class VoiceWebSocketHandler:
                     full_ai_text = ai_transcript_text
                     self._transcript.append({"role": "ai", "text": full_ai_text})
                     ai_transcript_text = ""
+                    persisted_turn = True
                     log.debug(
                         "turn_saved ai_transcript",
                         length=len(full_ai_text),
                         session=self.session_id,
                     )
+                    record_text_output(self.tenant_id, full_ai_text, source="output_transcript")
+                elif streamed_text_output:
+                    record_text_output(self.tenant_id, streamed_text_output, source="text_stream")
 
                 log.info(
                     "memory_turn_saved",
@@ -673,6 +865,10 @@ class VoiceWebSocketHandler:
                     user_turns=sum(1 for item in self._transcript if item["role"] == "user"),
                     ai_turns=sum(1 for item in self._transcript if item["role"] == "ai"),
                 )
+                self._complete_current_turn(status="success")
+                streamed_text_output = ""
+                if persisted_turn:
+                    await self._persist_session_state()
                 # Tell the browser to unlock the text box and mic button
                 await self._send_status(STATUS_DONE)
 
@@ -680,6 +876,8 @@ class VoiceWebSocketHandler:
             # --- NEW: Catch Google's warning that the session is about to die! ---
             elif event_type == "go_away":
                 log.info("triggering_graceful_reconnect_due_to_goaway", session=self.session_id)
+                observe_gemini_reconnect(self.tenant_id, reason="go_away")
+                self._complete_current_turn(status="reconnect")
                 # Close the browser websocket with Code 1000 so the frontend instantly reconnects!
                 await websocket.close(code=1000, reason="Gemini session refresh")
                 return
@@ -688,6 +886,8 @@ class VoiceWebSocketHandler:
             elif event_type == "session_closed":
                 reason = event.get("reason", "unknown")
                 log.info("gemini_session_closed_gracefully", reason=reason, session=self.session_id)
+                observe_gemini_reconnect(self.tenant_id, reason=reason)
+                self._complete_current_turn(status="session_closed")
 
                 # If it was a timeout, a 1008 bug, or a 1001 drop, instantly reconnect!
                 if reason in ["gemini_timeout", "gemini_live_1008", "normal_closure"] or event.get(
@@ -702,6 +902,7 @@ class VoiceWebSocketHandler:
             elif event_type == MSG_ERROR:
                 error_message: str = event.get("message", "Unknown Gemini error")
                 log.error("gemini_error", error=error_message, session=self.session_id)
+                self._complete_current_turn(status="error")
                 await self._send_error(f"AI error: {error_message}")
 
     # =========================================================================

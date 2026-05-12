@@ -1,135 +1,319 @@
 # Voice Commerce Agent
 
-Voice Commerce Agent is a real-time shopping assistant for storefronts. It combines Gemini Live voice interaction, tool calling, semantic product search, and browser actions so a shopper can speak naturally and see the page respond in real time.
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Ruff](https://img.shields.io/badge/lint-ruff-yellow.svg)](https://docs.astral.sh/ruff/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.135-teal.svg)](https://fastapi.tiangolo.com/)
 
-The project is structured as a full voice-commerce system: a widget captures user input, a FastAPI backend manages the live session, Gemini calls tools when needed, retrieval augments product search, and browser actions update the storefront UI.
+Real-time AI voice commerce for storefronts. Customers can speak naturally, search products semantically, see the page respond with highlights and filters, add items to cart, and complete a guided checkout flow through one embeddable widget.
 
-## Preview
-
-<p align="center">
-  <img src="docs/demo/Demo%20Gif%201.gif" alt="Voice Commerce Agent live demo showing the storefront and voice assistant flow" width="100%" />
-</p>
-
-<p align="center"><em>Live demo: voice-guided shopping flow in the storefront widget.</em></p>
+Built with FastAPI, Gemini Live API, Qdrant, sentence-transformers, PostgreSQL-ready session persistence, Prometheus metrics, Langfuse tracing, and Docker-based deployment assets.
 
 <p align="center">
-  <img src="docs/demo/Screenshot%201.png" alt="Voice Commerce Agent storefront with the voice widget open" width="100%" />
+  <img src="docs/demo/Demo%20Gif%201.gif" alt="Voice Commerce Agent live demo" width="100%" />
 </p>
 
-<p align="center"><em>Hero shot: storefront experience with the voice widget open.</em></p>
+<p align="center"><em>Live demo: natural voice query -> semantic product search -> browser highlights -> cart and checkout actions.</em></p>
+
+---
+
+## What This Project Demonstrates
+
+This is not a basic chatbot. It is an end-to-end voice commerce system with real-time audio, tool calling, semantic retrieval, browser-side actions, tenant-aware catalog isolation, observability, and deployment hardening.
+
+Strong engineering points:
+
+- Real-time bidirectional voice over WebSocket using Gemini Live.
+- Semantic product search with local embeddings and Qdrant vector retrieval.
+- Browser action layer that turns AI tool results into visible storefront changes.
+- Clean separation between routes, handlers, services, tools, RAG, and browser actions.
+- Typed Pydantic contracts at external boundaries instead of loose dictionaries.
+- CSV-backed demo catalog for reliable local demos, with WooCommerce integration kept isolated.
+- Tenant-aware product catalog, session, and usage paths.
+- Prometheus metrics, structured logging, usage/cost tracking, and optional Langfuse traces.
+- Docker Compose stack with app, Qdrant, PostgreSQL, nginx, systemd, and CI/CD deployment assets.
+
+---
+
+## Current Status
+
+Implemented:
+
+- Voice and text conversation through Gemini Live.
+- Audio input and output streaming.
+- Tool calling for products, cart, and checkout.
+- RAG product search with sentence-transformers and Qdrant.
+- Browser DOM actions through `static/widget.js`.
+- Embeddable single-file storefront widget.
+- Demo storefront and repeatable CSV catalog.
+- Qdrant-safe tenant product point IDs.
+- Tenant-aware catalog sync and search.
+- Admin tenant APIs and tenant settings.
+- PostgreSQL-backed session/tenant persistence path.
+- Structured logging with tenant/session context.
+- Prometheus `/metrics` endpoint.
+- `/admin/usage` usage and estimated cost endpoint.
+- Langfuse tracing integration behind feature flags.
+- Docker, Compose, production env template, nginx config, systemd unit, and GitHub Actions deploy workflow.
+
+Validated locally:
+
+- `91 passed, 2 deselected` for non-integration tests.
+- Ruff passes.
+- `/health` and `/ready` pass.
+- `/metrics` records startup, RAG, Qdrant, Gemini, turn, audio, tool, and usage metrics.
+- `/admin/usage` records text, audio, and tool usage.
+- Checkout tool metrics validated for `search_products`, `add_to_cart`, `begin_checkout`, `set_checkout_option`, and `confirm_checkout`.
+
+Deployment note:
+
+- Phase 14 deployment assets are present and partially validated.
+- Docker image build starts correctly, but the current ML dependency stack pulls a large PyTorch/CUDA wheel set. Image slimming is the main remaining deployment optimization before a lightweight VPS deploy.
+
+---
+
+## Demo Screenshots
+
+<p align="center">
+  <img src="docs/demo/Screenshot%201.png" alt="Voice widget open on storefront" width="100%" />
+</p>
+
+<p align="center"><em>Storefront with the voice widget open.</em></p>
 
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/demo/Screenshot%202%20__%20Search%20results%20in%20action.png" alt="Search results in action with highlighted products and widget transcript" width="100%" />
-      <p><strong>Search results in action</strong><br />Shows retrieval, tool calling, and browser highlights working together.</p>
+      <img src="docs/demo/Screenshot%202%20__%20Search%20results%20in%20action.png" alt="Semantic search results and highlights" width="100%" />
+      <p><strong>Search results in action</strong><br />Semantic retrieval returns relevant products and the browser highlights them while the assistant explains the results.</p>
     </td>
     <td width="50%">
-      <img src="docs/demo/Screenshot%203%20__Cart%20%2B%20checkout%20flow.png" alt="Cart and checkout flow with order summary and shipping options" width="100%" />
-      <p><strong>Cart and checkout flow</strong><br />Shows the end-to-end purchase funnel with checkout state rendered in the storefront.</p>
+      <img src="docs/demo/Screenshot%203%20__Cart%20%2B%20checkout%20flow.png" alt="Cart and guided checkout" width="100%" />
+      <p><strong>Cart and checkout flow</strong><br />Voice-guided checkout with shipping, payment selection, order summary, and confirmation.</p>
     </td>
   </tr>
   <tr>
     <td colspan="2">
-      <img src="docs/demo/Screenshot%204%20__%20Voice-guided%20filtering%20and%20ranking.png" alt="Voice-guided filtering and ranking with storefront facets updated from the assistant request" width="100%" />
-      <p><strong>Voice-guided filtering and ranking</strong><br />Shows the assistant narrowing results with filters and sorting so the storefront reflects the shopper's constraints.</p>
+      <img src="docs/demo/Screenshot%204%20__%20Voice-guided%20filtering%20and%20ranking.png" alt="Voice-guided filtering and ranking" width="100%" />
+      <p><strong>Voice-guided filtering and ranking</strong><br />The assistant applies filters and ranking actions directly to the storefront DOM.</p>
     </td>
   </tr>
 </table>
 
-These screenshots capture the main user journey: greet the shopper, find products with natural language, highlight matches on the page, and move through cart to checkout.
-
-## Features
-
-- Real-time voice and text interaction through Gemini Live
-- WebSocket session handling for low-latency storefront conversations
-- Tool calling for product search, cart actions, and checkout flow
-- Semantic product retrieval with sentence-transformers and Qdrant
-- Browser actions for filters & sorts, navigation, highlights, cart updates, and checkout rendering
-- Embeddable widget for storefront integration
-- Local storefront page for testing and recording flows
-
-## Current Implementation
-
-The current codebase includes:
-
-- FastAPI backend with route, middleware, and lifespan setup
-- Gemini Live integration for streaming conversation
-- Retrieval pipeline with embedder, retriever, vector store, and catalog sync
-- CSV-backed catalog path for stable local runs
-- WooCommerce client path kept in the codebase for real store integration
-- In-memory cart and checkout state for the current interaction flow
-
-Planned next-stage improvements include persistent sessions, stronger deployment hardening, and production-grade multi-tenant support.
+---
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    User["User in Storefront"] --> Widget["Widget UI<br/>static/widget.js"]
-    Widget -->|Text / Mic Audio| WS["FastAPI WebSocket<br/>voice_websocket_handler.py"]
-    WS --> Gemini["Gemini Live Handler"]
-    Gemini -->|Tool Calls| Dispatcher["Tool Dispatcher"]
-    Dispatcher --> Tools["Product / Cart / Checkout Tools"]
-    Tools --> Rag["RAG Service"]
-    Rag --> Vector["Qdrant Vector Store"]
-    Tools --> Csv["CSV Product Client"]
-    Tools -. optional live store path .-> Woo["WooCommerce Client"]
-    Gemini -->|Browser Actions| Actions["Action Dispatcher"]
-    Actions --> Widget
-    Gemini -->|Audio + Transcript Events| WS
-    WS --> Widget
+```text
+Browser storefront
+  -> static/widget.js
+  -> WebSocket /ws/voice
+  -> VoiceWebSocketHandler
+  -> GeminiLiveHandler
+  -> ToolDispatcher
+  -> product/cart/checkout tools
+  -> RAG service
+  -> embedder + Qdrant vector store
+  -> CSV demo catalog or WooCommerce client
+  -> ActionDispatcher
+  -> browser DOM actions, audio, transcripts, cart, checkout UI
 ```
 
-### Request Flow
+### Runtime Flow
 
-1. The widget captures typed input or microphone audio.
-2. The FastAPI WebSocket handler opens and manages the live Gemini session.
-3. Gemini responds directly or issues tool calls through the dispatcher.
-4. Tools query product, cart, checkout, and retrieval services.
-5. Tool results return to Gemini as structured context.
-6. Gemini sends audio, transcript updates, and browser actions back to the widget.
+1. The widget captures typed text or microphone audio.
+2. The FastAPI WebSocket route accepts `/ws/voice` and delegates to `VoiceWebSocketHandler`.
+3. The handler runs two tasks: browser-to-Gemini and Gemini-to-browser.
+4. Gemini responds directly with audio/text or emits tool calls.
+5. `ToolDispatcher` executes product, cart, checkout, or RAG-backed tools.
+6. Tool results return to Gemini as structured context.
+7. `ActionDispatcher` maps results to browser actions.
+8. The widget executes highlights, filters, cart updates, checkout rendering, and audio playback.
+
+### Why The Architecture Matters
+
+- Routes stay thin and only wire HTTP/WebSocket entrypoints.
+- Session orchestration lives in `handlers/`.
+- External integrations are isolated in one boundary file each.
+- Tools return typed `ToolResponse` objects.
+- Browser actions have typed Pydantic models and a separate dispatcher.
+- RAG, catalog loading, and vector storage are isolated from Gemini logic.
+- Observability is centralized in `src/voice_commerce/observability/`.
+
+---
+
+## Key Technical Decisions
+
+### Gemini Live Instead Of REST Completion
+
+The app uses Gemini Live for persistent bidirectional audio. This avoids the slow STT -> LLM -> TTS chain and enables natural turn-taking, interruption handling, transcripts, audio output, and tool calling in the same session.
+
+### RAG Before Storefront Actions
+
+Product discovery is not keyword search. The assistant embeds catalog products, searches Qdrant, reranks results, then sends both natural language context to Gemini and structured browser actions to the widget.
+
+### Two Dispatchers Instead Of One God Function
+
+`ToolDispatcher` handles AI tool execution. `ActionDispatcher` handles UI effects. This keeps product/cart/checkout logic independent from browser DOM concerns.
+
+### CSV Demo Path Plus WooCommerce Boundary
+
+The demo uses `tests/products.csv` as runtime data so the full system can be tested without a live store. WooCommerce remains isolated in `services/woocommerce_client.py` for real-store integration.
+
+### Tenant-Aware Catalogs And Usage
+
+Tenant IDs flow through catalog sync, RAG search, tool execution, logs, metrics, and usage. Qdrant points are generated safely for tenant/product isolation.
+
+### Observability Is Built In
+
+The app emits structured logs, Prometheus metrics, usage summaries, estimated cost counters, and optional Langfuse traces. Metrics avoid high-cardinality labels like `session_id`.
+
+### Deployment As A First-Class Concern
+
+The repo includes Docker, Compose, nginx, systemd, production env templates, and GitHub Actions deploy workflow. The remaining deployment improvement is image-size optimization for the ML dependency stack.
+
+---
+
+## Feature Set
+
+### Voice And Text
+
+- Gemini Live bidirectional audio session.
+- Browser microphone capture through AudioWorklet.
+- PCM streaming over WebSocket.
+- Gapless audio playback scheduling.
+- Input and output transcripts.
+- Text input path for faster testing and accessibility.
+- Session refresh handling for Gemini session lifetime limits.
+
+### Product Search And RAG
+
+- Sentence-transformer embeddings with multilingual support.
+- Qdrant vector store in memory or server mode.
+- Catalog sync on startup.
+- Tenant-scoped vector search.
+- Category intelligence injected into the system prompt.
+- Heuristic reranking for category-sensitive product queries.
+- Pagination and de-duplication across search turns.
+
+### Tools
+
+- Product search.
+- Product details.
+- Category discovery.
+- Add to cart.
+- Show/remove cart items.
+- Begin checkout.
+- Set checkout options.
+- Confirm checkout.
+- Session-aware tool execution.
+
+### Browser Actions
+
+- Product highlighting.
+- Product scrolling.
+- Category filter application.
+- Sort application.
+- Cart badge updates.
+- Cart drawer rendering.
+- Quick-view modal support.
+- Checkout overlay rendering.
+
+### Multi-Tenant Foundation
+
+- Tenant settings and API key path.
+- Tenant-scoped catalog path.
+- Tenant-scoped RAG sync and search.
+- Tenant context in logs and metrics.
+- Admin tenant route foundation.
+- PostgreSQL-backed tenant/session persistence path.
+
+### Observability
+
+- Structured logging through `structlog`.
+- Tenant and session context binding.
+- Prometheus `/metrics` route.
+- Startup and warmup metrics.
+- RAG, embedding, Qdrant, and tool metrics.
+- Gemini session and turn latency metrics.
+- Audio input/output bytes, chunks, seconds, and estimated tokens.
+- `/admin/usage` usage summary.
+- Estimated cost tracking with configurable prices.
+- Optional Langfuse tracing.
+
+### Deployment
+
+- Multi-stage Dockerfile.
+- Non-root container runtime user.
+- Container healthcheck.
+- Docker Compose stack for app, Qdrant, and PostgreSQL.
+- Production Compose override for GHCR images.
+- Production env template.
+- nginx reverse proxy config with WebSocket upgrade headers.
+- systemd unit for the Compose stack.
+- GitHub Actions test/build/push/deploy workflow.
+- Deployment runbook in `docs/deployment.md`.
+
+---
 
 ## Repository Structure
 
 ```text
 src/voice_commerce/
-├── api/
-│   ├── middleware/        # middleware such as CORS
-│   └── routes/            # thin FastAPI route wiring
-├── config/                # environment-backed settings
-├── core/
-│   ├── actions/           # browser action models and dispatch
-│   ├── rag/               # embedder, retriever, vector store
-│   ├── state/             # in-memory checkout state
-│   ├── tools/             # tool implementations used by Gemini
-│   └── voice/             # Gemini live adapter and audio helpers
-├── handlers/              # WebSocket session orchestration
-├── models/                # Pydantic models
-└── services/              # catalog clients and RAG service
+  api/
+    middleware/              CORS middleware
+    routes/                  FastAPI route wiring
+  config/                    pydantic-settings configuration
+  core/
+    actions/                 browser action models and dispatcher
+    rag/                     embedder, retriever, Qdrant wrapper
+    state/                   checkout/session state models
+    tools/                   Gemini tool schemas, dispatcher, implementations
+    voice/                   Gemini Live handler and audio helpers
+  handlers/                  WebSocket session orchestration
+  models/                    Pydantic contracts
+  observability/             logging, metrics, usage, costs, tracing
+  services/                  CSV, WooCommerce, RAG, session, tenant services
+  main.py                    app factory, lifespan, route registration
 
 static/
-├── widget.js              # storefront widget
-├── embed_demo.html        # local storefront page
-└── test_client.html       # test harness
+  widget.js                  embeddable storefront widget
+  embed_demo.html            local demo storefront
+  test_client.html           developer test harness
 
-tests/                     # pytest suite
-local/                     # planning docs and implementation notes
-docs/demo/                 # screenshots and GIFs for GitHub
+docs/
+  deployment.md              Phase 14 deployment runbook
+  observability.md           Phase 13 observability guide
+  demo/                      GIF and screenshots
+
+deploy/
+  nginx.conf                 production reverse proxy template
+  voice-commerce.service     systemd unit for Docker Compose stack
+
+.github/workflows/
+  deploy.yml                 test, build, push, deploy workflow
 ```
+
+---
 
 ## Tech Stack
 
-| Layer | Choice |
-|---|---|
-| Backend | FastAPI |
-| Language | Python 3.12 |
-| Real-time AI | Gemini Live API |
-| Product search | sentence-transformers + Qdrant |
-| Data models | Pydantic |
-| Config | pydantic-settings |
-| Logging | structlog |
-| Package manager | uv |
+| Layer | Technology | Purpose |
+|---|---|---|
+| Backend | FastAPI | Async HTTP/WebSocket server |
+| Realtime AI | Gemini Live API | Bidirectional audio, transcripts, tool calling |
+| Embeddings | sentence-transformers | Local product embeddings |
+| Vector DB | Qdrant | Semantic product retrieval |
+| Persistence | PostgreSQL + asyncpg | Session and tenant persistence path |
+| Models | Pydantic v2 | Typed contracts and validation |
+| Config | pydantic-settings | Environment-driven settings |
+| Logging | structlog | Structured logs with context |
+| Metrics | prometheus-client | Prometheus endpoint and counters/histograms |
+| Tracing | Langfuse | Optional LLM traces |
+| Packaging | uv | Fast dependency management |
+| Runtime | Docker Compose | App, Qdrant, PostgreSQL stack |
+| Proxy | nginx | TLS and WebSocket reverse proxy |
+
+---
 
 ## Running Locally
 
@@ -142,69 +326,173 @@ docs/demo/                 # screenshots and GIFs for GitHub
 ### Setup
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/mahmoud-emad-dev/voice-commerce-agent.git
 cd voice-commerce-agent
 uv sync
 cp .env.example .env
 ```
 
-At minimum, set:
+Set at minimum:
 
 ```env
 GEMINI_API_KEY=your_key_here
+ENABLE_PUBLIC_DEMO=true
 ```
 
-WooCommerce variables are also included in `.env.example` for the live-store integration path.
-
-### Start The App
+Start the app:
 
 ```bash
 uv run uvicorn src.voice_commerce.main:app --reload --port 8000
 ```
 
-Useful local URLs:
+Open:
 
-- API root: `http://localhost:8000/`
+- Demo storefront: `http://localhost:8000/static/embed_demo.html`
 - Health: `http://localhost:8000/health`
-- Storefront page: `http://localhost:8000/static/embed_demo.html`
-- Widget asset: `http://localhost:8000/static/widget.js`
+- Readiness: `http://localhost:8000/ready`
+- Metrics: `http://localhost:8000/metrics`
+- Usage: `http://localhost:8000/admin/usage`
 
-## Testing
-
-Run the full suite:
-
-```bash
-uv run pytest tests/ -v
-```
-
-Run a focused file:
+### Tests
 
 ```bash
-uv run pytest tests/test_health.py -v
+uv run ruff check .
+uv run pytest tests/ -m "not integration" -q
 ```
 
-## Environment Notes
+Integration tests that hit Gemini or WooCommerce require real credentials.
 
-- `.env` is local-only and ignored by Git.
-- `.env.example` is the shareable template for GitHub.
-- `CORS_ALLOW_ORIGINS=["*"]` is acceptable for local development and should be restricted for deployment.
+---
 
-## Roadmap
+## Docker And Deployment
 
-- Persist session and checkout state beyond process memory
-- Harden deployment configuration and access control
-- Expand the live-store integration path
-- Improve observability and operational safeguards
-- Add multi-tenant support for hosted storefront use
+Local production-shaped stack:
 
-## Good Portfolio Talking Points
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production up -d --build
+```
 
-- End-to-end voice commerce loop: user input, tool call, browser action, UI update
-- Real-time WebSocket orchestration around Gemini Live
-- Retrieval-backed product search instead of exact keyword matching
-- Separation between tool logic and browser-side effects
-- Clear path from local catalog mode to live store integration
+Check:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/ready
+curl -H "X-Admin-Key: YOUR_ADMIN_KEY" http://127.0.0.1:8000/metrics
+```
+
+Production deployment assets:
+
+- `Dockerfile`
+- `docker-compose.yml`
+- `docker-compose.prod.yml`
+- `.env.production.example`
+- `deploy/nginx.conf`
+- `deploy/voice-commerce.service`
+- `.github/workflows/deploy.yml`
+- `docs/deployment.md`
+
+Read the deployment runbook:
+
+```text
+docs/deployment.md
+```
+
+---
+
+## Embedding The Widget
+
+Add one script tag to a storefront:
+
+```html
+<script
+  src="https://voice.example.com/static/widget.js"
+  data-ws-url="wss://voice.example.com/ws/voice"
+  data-tenant="demo"
+  data-theme="auto"
+  data-position="bottom-right"
+></script>
+```
+
+The widget is a dependency-free IIFE. It injects its own CSS, opens the WebSocket, captures mic audio, plays streamed audio, renders transcripts, and executes browser actions.
+
+---
+
+## Observability
+
+Useful endpoints:
+
+- `GET /health`
+- `GET /ready`
+- `GET /metrics`
+- `GET /admin/usage`
+
+Production behavior:
+
+- `APP_DEBUG=false`
+- `LOG_JSON=true`
+- `METRICS_REQUIRE_ADMIN_KEY=true`
+- `ENABLE_PUBLIC_DEMO=false`
+- `DEBUG_PAYLOAD_LOGS=false`
+- `TRACE_PAYLOAD_PREVIEWS=false`
+
+See:
+
+```text
+docs/observability.md
+```
+
+---
+
+## Project Phases
+
+Completed or implemented:
+
+- Phase 0: environment setup
+- Phase 1: project skeleton
+- Phase 2: text pipeline
+- Phase 3: Gemini function calling
+- Phase 4: text-to-audio output
+- Phase 5: microphone audio input
+- Phase 6: WooCommerce tool boundary
+- Phase 7: RAG integration
+- Phase 8: browser actions
+- Phase 9: embeddable widget
+- Phase 10: demo polish
+- Phase 11: Docker, Qdrant, PostgreSQL persistence path
+- Phase 12: multi-tenant foundation
+- Phase 13: observability
+- Phase 14: deployment scaffolding and hardening
+
+Remaining improvement backlog:
+
+- Slim Docker image by forcing CPU-only ML dependencies or externalizing embeddings.
+- Run full VPS deployment against a real domain.
+- Add production load/rate-limit tests.
+- Add persistent billing-grade usage storage.
+- Add dashboards and alerts on top of Prometheus metrics.
+- Add a production eval suite for synthetic voice-commerce journeys.
+
+---
+
+## Engineering Highlights
+
+This project combines several system concerns that are often built separately:
+
+- realtime audio streaming
+- LLM tool calling
+- typed backend contracts
+- retrieval-augmented product search
+- browser automation from AI decisions
+- multi-tenant isolation patterns
+- production observability
+- containerized deployment infrastructure
+- CI/CD-ready release path
+
+The main engineering strength is the separation of concerns: Gemini handles conversation, tools handle business operations, RAG handles product retrieval, browser actions handle UI effects, and observability/deployment are treated as first-class system layers.
+
+---
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

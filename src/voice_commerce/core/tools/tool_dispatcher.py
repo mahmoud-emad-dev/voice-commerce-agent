@@ -1,13 +1,17 @@
 from __future__ import annotations
+
 import asyncio
-from typing import Any
+import time
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
-from google.genai import types
 
-from voice_commerce.core.tools import tool_registry , cart_tools, checkout_tools, product_tools
+from voice_commerce.core.tools import cart_tools, checkout_tools, product_tools, tool_registry
 from voice_commerce.models.tool_response import ToolResponse
+from voice_commerce.observability.metrics import observe_tool_call
+from voice_commerce.observability.tracing import get_tracer
+from voice_commerce.observability.usage import record_tool_call
 
 log = structlog.get_logger(__name__)
 
@@ -25,7 +29,7 @@ _TOOL_EXECUTION_TIMEOUT_S = 5
 class ToolContext:
 
     session_id: str
-    tenant_id:  str | None = None   # Phase 12: multi-tenancy
+    tenant_id: str | None = None
 
 
 _TOOLS: dict[str, Any] = {
@@ -62,29 +66,69 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
       tool_args keys win if there's a collision (Gemini's data is authoritative).
     """
     log.info("Executing tool", tool_name=tool_name, arguments=arguments, session=context.session_id)
+    started_at = time.perf_counter()
 
     if not tool_registry.is_registered(tool_name):
         log.warning("dispatcher_unknown_tool", name=tool_name)
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="unknown_tool",
+        )
         return ToolResponse.error(
             f"I don't have a '{tool_name}' function. "
             f"Available tools: {', '.join(_TOOLS)}"
         )
     
-    merged_args = {"session_id": context.session_id, **arguments}
+    merged_args = {"session_id": context.session_id, "tenant_id": context.tenant_id, **arguments}
 
     log.info(
         "dispatcher_calling",
         tool=tool_name,
         args={k: str(v)[:40] for k, v in arguments.items()},
         session=context.session_id,
+        tenant_id=context.tenant_id,
     )
     try:
         async with asyncio.timeout(_TOOL_EXECUTION_TIMEOUT_S):
             result: ToolResponse = await _TOOLS[tool_name](**merged_args)
+        record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_observation(
+            f"tool_{tool_name}",
+            as_type="tool",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            output_payload={"status": result.status},
+            metadata={"tool_name": tool_name, "status": result.status},
+            model=None,
+        )
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status=result.status,
+        )
         log.info("dispatcher_done", tool=tool_name, result=result.ai_text)
         return result
     
     except TimeoutError:
+        record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_event(
+            "tool_timeout",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            metadata={"tool_name": tool_name},
+            level="ERROR",
+        )
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="timeout",
+        )
         log.error(
             "dispatcher_timeout",
             tool=tool_name,
@@ -94,10 +138,40 @@ async def execute(tool_name: str, arguments: dict[str, Any], context: ToolContex
         return ToolResponse.error("That request took too long. Please try again.")
     
     except TypeError as exc:
+        record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_event(
+            "tool_arg_mismatch",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            metadata={"tool_name": tool_name, "error": str(exc)},
+            level="WARNING",
+        )
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="arg_mismatch",
+        )
         log.warning("dispatcher_arg_mismatch", tool=tool_name, error=str(exc))
         return ToolResponse.error(f"I had trouble calling {tool_name}. Please try rephrasing.")
 
     except Exception as exc:
+        record_tool_call(context.tenant_id, tool_name)
+        get_tracer().record_event(
+            "tool_error",
+            session_id=context.session_id,
+            tenant_id=context.tenant_id,
+            input_payload=arguments,
+            metadata={"tool_name": tool_name, "error": str(exc)},
+            level="ERROR",
+        )
+        observe_tool_call(
+            context.tenant_id,
+            tool_name,
+            time.perf_counter() - started_at,
+            status="error",
+        )
         log.error("dispatcher_error", tool=tool_name, error=str(exc), exc_info=True)
         return ToolResponse.error("Something went wrong. Please try again.")
 

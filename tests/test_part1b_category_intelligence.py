@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from voice_commerce.core.voice import prompts
 from voice_commerce.models.product import Product, ProductCategory
 from voice_commerce.services.rag_service import RagService
-from voice_commerce.core.voice import prompts
+
+
 def _product(
     *,
     product_id: int,
@@ -16,7 +18,10 @@ def _product(
         name=name,
         price=price,
         stock_status=stock_status,
-        categories=[ProductCategory(name=path, slug=path.lower().replace(" ", "-")) for path in category_paths],
+        categories=[
+            ProductCategory(name=path, slug=path.lower().replace(" ", "-"))
+            for path in category_paths
+        ],
     )
 
 
@@ -49,21 +54,47 @@ def test_parse_category_path_single_two_three_level() -> None:
 def test_build_category_indexes_summary_and_grouped_snapshots() -> None:
     rag = RagService()
     products = [
-        _product(product_id=1, name="Road Runner", price=120.0, category_paths=["Men > Shoes > Running"]),
-        _product(product_id=2, name="Trail Pro", price=180.0, category_paths=["Men > Shoes > Trail"], stock_status="outofstock"),
-        _product(product_id=3, name="Lift Tee", price=35.0, category_paths=["Women > Apparel > Tops"]),
+        _product(
+            product_id=1,
+            name="Road Runner",
+            price=120.0,
+            category_paths=["Men > Shoes > Running"],
+        ),
+        _product(
+            product_id=2,
+            name="Trail Pro",
+            price=180.0,
+            category_paths=["Men > Shoes > Trail"],
+            stock_status="outofstock",
+        ),
+        _product(
+            product_id=3,
+            name="Lift Tee",
+            price=35.0,
+            category_paths=["Women > Apparel > Tops"],
+        ),
     ]
 
-    summary, grouped = rag._build_category_indexes(products)
+    summary, grouped, lookup = rag._build_category_indexes(products)
 
     assert set(summary.keys()) == {"Running", "Trail", "Tops"}
     assert summary["Running"]["count"] == 1
     assert summary["Trail"]["count"] == 1
     assert summary["Tops"]["count"] == 1
+    assert lookup["running"] == "Running"
 
     running_items = grouped["Running"]
     assert len(running_items) == 1
-    assert {"id", "name", "price", "stock_status", "main_category", "sub_category", "leaf_category", "full_path"} <= set(
+    assert {
+        "id",
+        "name",
+        "price",
+        "stock_status",
+        "main_category",
+        "sub_category",
+        "leaf_category",
+        "full_path",
+    } <= set(
         running_items[0].keys()
     )
     assert running_items[0]["main_category"] == "Men"
@@ -72,16 +103,18 @@ def test_build_category_indexes_summary_and_grouped_snapshots() -> None:
 
 def test_safe_read_accessors_return_copies() -> None:
     rag = RagService()
-    rag._category_summary = {
+    state = rag._get_tenant_state()
+    state.category_summary = {
         "Men": {
             "count": 1,
             "example_names": ["Road Runner"],
             "min_price": 99.0,
             "max_price": 99.0,
             "subcategories": ["Shoes"],
+            "parent_groups": ["Men"],
         }
     }
-    rag._products_by_category = {
+    state.products_by_category = {
         "Men": [
             {
                 "id": 1,
@@ -102,8 +135,9 @@ def test_safe_read_accessors_return_copies() -> None:
     summary_copy["Men"]["example_names"].append("Mutated")
     grouped_copy["Men"][0]["name"] = "Changed"
 
-    assert rag._category_summary["Men"]["example_names"] == ["Road Runner"]
-    assert rag._products_by_category["Men"][0]["name"] == "Road Runner"
+    assert state.category_summary["Men"]["example_names"] == ["Road Runner"]
+    assert state.products_by_category["Men"][0]["name"] == "Road Runner"
+    assert summary_copy["Men"]["parent_groups"] == ["Men"]
 
 
 def test_prompt_includes_category_summary_or_fallback() -> None:

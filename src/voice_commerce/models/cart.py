@@ -8,8 +8,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Any
 
+from pydantic import BaseModel, Field
 
 
 class CartItem(BaseModel):
@@ -63,28 +64,38 @@ class Cart(BaseModel):
     def to_tool_response(self) -> dict[str, Any]:
         """Formatted cart summary for Gemini to read as a tool response."""
         if self.is_empty():
-            return {"ai_text": "Your cart is empty. Would you like me to help find something?",
-                    "data": {
-                        "cart_total": 0,
-                        "item_count": 0,
-                        "items": []
-                    }
+            return {
+                "ai_text": "Your cart is empty. Would you like me to help find something?",
+                "data": {
+                    "cart_total": 0,
+                    "item_count": 0,
+                    "items": [],
+                },
             }
  
         lines = ["Your cart:"]
         for item in self.items.values():
             lines.append(f"  {item.to_display_line()}")
-        lines.append(f"\nTotal: ${self.total:.2f} ({self.item_count} item{'s' if self.item_count != 1 else ''})")
+        item_label = f"{self.item_count} item{'s' if self.item_count != 1 else ''}"
+        lines.append(
+            f"\nTotal: ${self.total:.2f} ({item_label})"
+        )
         lines.append("Ready to checkout when you are!")
-        ai_text= "\n".join(lines)
+        ai_text = "\n".join(lines)
         # Returns a dict that perfectly maps into our ToolResponse kwargs!
-        return {"ai_text": ai_text ,
-                "data": {
-                    "cart_total": self.total,
-                    "item_count": self.item_count,
-                    "items": [
-                        {"id": pid, "name": item.name, "quantity": item.quantity, "price": item.price}
-                        for pid, item in self.items.items()
-                    ]
-                }
+        return {
+            "ai_text": ai_text,
+            "data": {
+                "cart_total": self.total,
+                "item_count": self.item_count,
+                "items": [
+                    {
+                        "id": pid,
+                        "name": item.name,
+                        "quantity": item.quantity,
+                        "price": item.price,
+                    }
+                    for pid, item in self.items.items()
+                ],
+            },
         }

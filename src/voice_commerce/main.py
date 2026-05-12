@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -12,10 +12,24 @@ import structlog
 from fastapi import FastAPI
 
 from voice_commerce.api.middleware.cors import add_cors_middleware
-from voice_commerce.api.routes import health, voice, widget
+from voice_commerce.api.routes import admin, health, metrics, voice, widget
 from voice_commerce.config.settings import settings
 from voice_commerce.core.rag import embedder
+from voice_commerce.observability.logging import configure_logging
+from voice_commerce.observability.metrics import (
+    STARTUP_DURATION,
+    initialize_base_metrics,
+    observe_startup_step,
+)
 from voice_commerce.services.rag_service import get_rag_service
+from voice_commerce.services.session_state_store import (
+    initialize_session_state_store,
+    shutdown_session_state_store,
+)
+from voice_commerce.services.tenant_service import (
+    initialize_tenant_service,
+    shutdown_tenant_service,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -24,57 +38,33 @@ async def _warm_rag_pipeline() -> None:
     """Warm the embedder and then sync the catalog without blocking app startup."""
     rag = get_rag_service()
     try:
+        embedder_started_at = time.perf_counter()
         await embedder.warmup()
+        observe_startup_step(
+            "embedder_warmup",
+            time.perf_counter() - embedder_started_at,
+            status="success",
+        )
         log.info("app_startup_embedder_warmed")
+
+        rag_sync_started_at = time.perf_counter()
         indexed = await rag.sync_catalog()
+        observe_startup_step(
+            "rag_catalog_sync",
+            time.perf_counter() - rag_sync_started_at,
+            status="success",
+        )
         log.info("app_startup_rag_catalog_sync_finished", indexed=indexed)
     except Exception as exc:
+        observe_startup_step("rag_pipeline", 0.0, status="error")
         log.exception("app_startup_rag_pipeline_failed", error=str(exc))
-
-
-def configure_logging() -> None:
-    """
-    Configure structlog for structured JSON logging.
-    Called once at application startup.
-
-    The configuration chain:
-    1. structlog.contextvars.merge_contextvars — adds any context variables
-       (like tenant_id) that were bound with structlog.contextvars.bind_contextvars()
-    2. structlog.stdlib.add_log_level — adds the "level" field to every log entry
-    3. structlog.stdlib.add_logger_name — adds the "logger" field (which file logged it)
-    4. structlog.processors.TimeStamper — adds ISO 8601 timestamp
-    5. structlog.dev.ConsoleRenderer — pretty output in dev (JSON in production)
-    """
-    log_level = getattr(logging, settings.log_level, logging.INFO)
-
-    structlog.configure(
-        processors=[
-            # Merge any contextvars (we'll use this in Phase 13 to auto-attach tenant_id)
-            structlog.contextvars.merge_contextvars,
-            # Add standard fields to every log entry
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
-            structlog.processors.TimeStamper(fmt="iso"),
-            # In debug mode: pretty colored output for readability
-            # In production: JSON output for machine parsing
-            structlog.dev.ConsoleRenderer()
-            if settings.app_debug
-            else structlog.processors.JSONRenderer(),
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-    )
-
-    # Also configure the standard library logging to the same level
-    # (some libraries use stdlib logging directly)
-    logging.basicConfig(level=log_level, format="%(message)s")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     """Manage startup and shutdown resources for the FastAPI application."""
     # --- STARTUP ---
+    startup_started_at = time.perf_counter()
     log.info(
         "voice_commerce_agent_starting",
         port=settings.app_port,
@@ -96,15 +86,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     # pages reproducible and independent from a live storefront.
     from voice_commerce.services import csv_client
 
-    store_client = await csv_client.initialize()
+    csv_started_at = time.perf_counter()
+    store_client = await csv_client.initialize(settings.demo_tenant_catalog_path)
+    observe_startup_step(
+        "csv_client_initialize",
+        time.perf_counter() - csv_started_at,
+        status="success",
+    )
     app.state.store_client = store_client
     log.info("app_startup_csv_store_connected")
+
+    session_store_started_at = time.perf_counter()
+    await initialize_session_state_store()
+    observe_startup_step(
+        "session_state_store_initialize",
+        time.perf_counter() - session_store_started_at,
+        status="success",
+    )
+    log.info("app_startup_session_state_store_initialized", enabled=settings.postgres_enabled)
+
+    tenant_service_started_at = time.perf_counter()
+    await initialize_tenant_service()
+    observe_startup_step(
+        "tenant_service_initialize",
+        time.perf_counter() - tenant_service_started_at,
+        status="success",
+    )
+    log.info("app_startup_tenant_service_initialized", mode=settings.tenant_mode)
 
     # Warm the demo catalog in the background so semantic search is ready soon
     # after startup without blocking the server boot sequence.
     get_rag_service()
     asyncio.create_task(_warm_rag_pipeline())
     log.info("app_startup_rag_service_initialized")
+    STARTUP_DURATION.observe(time.perf_counter() - startup_started_at)
 
     yield
 
@@ -114,6 +129,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, Any]:
     await csv_client.shutdown()
     log.info("app_shutdown_csv_store_disconnected")
 
+    await shutdown_session_state_store()
+    log.info("app_shutdown_session_state_store_closed")
+    await shutdown_tenant_service()
+    log.info("app_shutdown_tenant_service_closed")
+
     log.info("Application  shut down completed")
 
 
@@ -122,6 +142,7 @@ def create_app() -> FastAPI:
     Factory function to create and configure the FastAPI instance.
     """
     configure_logging()
+    initialize_base_metrics()
 
     app = FastAPI(
         title="Voice Commerce Agent",
@@ -152,6 +173,8 @@ def create_app() -> FastAPI:
 
     # Register other routes
     app.include_router(health.router, tags=["system"])
+    app.include_router(metrics.router, tags=["system"])
+    app.include_router(admin.router, prefix="/admin", tags=["admin"])
     app.include_router(voice.router, prefix="/ws", tags=["voice"])
     app.include_router(widget.router, prefix="/static", tags=["widget"])
 

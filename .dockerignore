@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.idea/
+.vscode/
+local/
+tests/
+!tests/products.csv

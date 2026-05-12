@@ -6,6 +6,7 @@ from pathlib import Path
 
 import structlog
 
+from voice_commerce.config.settings import settings
 from voice_commerce.models.product import Product
 
 log = structlog.get_logger(__name__)
@@ -31,32 +32,76 @@ class CSVNotFoundError(CSVAPIError):
 # SINGLETON LIFECYCLE (Mimics WooCommerce Client)
 # =============================================================================
 
-_client_instance: "CSVProductClient | None" = None
+_client_instance: CSVProductClient | None = None
+_tenant_clients: dict[str, CSVProductClient] = {}
 
 
-def get_client() -> "CSVProductClient":
+def _resolve_csv_path(csv_path: str) -> str:
+    candidate = Path(str(csv_path or csv_default_path).strip() or csv_default_path)
+    if not candidate.is_absolute():
+        candidate = _PROJECT_ROOT / candidate
+    return str(candidate)
+
+
+def get_client() -> CSVProductClient:
     """Return the initialized CSV-backed store client."""
     if _client_instance is None:
         raise RuntimeError("CSVProductClient not initialized.")
     return _client_instance
 
 
+def get_client_for_tenant(tenant_id: str | None = None) -> CSVProductClient:
+    """Return the initialized CSV-backed client for one tenant."""
+    resolved_tenant_id = (
+        str(tenant_id or settings.demo_tenant_id).strip() or settings.demo_tenant_id
+    )
+    client = _tenant_clients.get(resolved_tenant_id)
+    if client is not None:
+        return client
+    if resolved_tenant_id == settings.demo_tenant_id:
+        return get_client()
+    raise RuntimeError(f"CSVProductClient not initialized for tenant '{resolved_tenant_id}'.")
+
+
 async def initialize(csv_path: str = csv_default_path) -> CSVProductClient:
     """Create and store the process-wide CSV client used by the demo."""
     global _client_instance
-    client = CSVProductClient(csv_path)
+    client = CSVProductClient(_resolve_csv_path(csv_path))
     _client_instance = client
-    log.info("csv_client_initialized", path=csv_path)
+    _tenant_clients[settings.demo_tenant_id] = client
+    log.info("csv_client_initialized", tenant_id=settings.demo_tenant_id, path=client.csv_path)
+    return client
+
+
+async def initialize_tenant_client(tenant_id: str, csv_path: str) -> CSVProductClient:
+    """Create or replace the CSV client for one tenant catalog."""
+    global _client_instance
+    resolved_tenant_id = (
+        str(tenant_id or settings.demo_tenant_id).strip() or settings.demo_tenant_id
+    )
+    client = CSVProductClient(_resolve_csv_path(csv_path))
+    previous = _tenant_clients.get(resolved_tenant_id)
+    if previous is not None:
+        await previous.close()
+    _tenant_clients[resolved_tenant_id] = client
+    if resolved_tenant_id == settings.demo_tenant_id:
+        _client_instance = client
+    log.info(
+        "csv_tenant_client_initialized",
+        tenant_id=resolved_tenant_id,
+        path=client.csv_path,
+    )
     return client
 
 
 async def shutdown() -> None:
     """Release the process-wide CSV client during app shutdown."""
     global _client_instance
-    if _client_instance is not None:
-        await _client_instance.close()
-        _client_instance = None
-        log.info("csv_client_shutdown")
+    for client in list(_tenant_clients.values()):
+        await client.close()
+    _tenant_clients.clear()
+    _client_instance = None
+    log.info("csv_client_shutdown")
 
 
 # =============================================================================
@@ -76,7 +121,7 @@ class CSVProductClient:
     def _load_csv(self) -> None:
         """Parse the CSV catalog into validated Product instances."""
         try:
-            with open(self.csv_path, mode="r", encoding="utf-8-sig") as f:
+            with open(self.csv_path, encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     try:

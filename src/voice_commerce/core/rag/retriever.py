@@ -23,14 +23,15 @@
 
 
 from __future__ import annotations
-from typing import Any
+
+import time
 
 import structlog
 
 from voice_commerce.core.rag import embedder
 from voice_commerce.core.rag.vector_store import VectorStore
 from voice_commerce.models.product import Product
-
+from voice_commerce.observability.metrics import observe_embedding
 
 log = structlog.get_logger()
 
@@ -56,7 +57,8 @@ class Retriever:
         limit: int = 5,
         offset: int = 0,
         max_price: float | None = None,
-        ) -> list[Product]:
+        tenant_id: str = "demo",
+    ) -> list[Product]:
         """
         Embed the query and search Qdrant for the most similar products.
 
@@ -75,9 +77,20 @@ class Retriever:
 
         # 1. Embed the user's spoken query
         log.debug("retriever_embedding_query", query=query[:80])
+        embed_started_at = time.perf_counter()
         try:
             query_vector = embedder.embed(query)
+            observe_embedding(
+                "query",
+                time.perf_counter() - embed_started_at,
+                status="success",
+            )
         except Exception as e:
+            observe_embedding(
+                "query",
+                time.perf_counter() - embed_started_at,
+                status="error",
+            )
             log.error("retriever_embed_error", error=str(e))
             return []
 
@@ -88,6 +101,7 @@ class Retriever:
                 limit=limit,
                 offset=offset,
                 max_price=max_price,
+                tenant_id=tenant_id,
             )
         except Exception as e:
             log.exception("retriever_search_failed", query=query[:80], error=str(e))
