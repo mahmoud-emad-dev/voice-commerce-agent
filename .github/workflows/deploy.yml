@@ -48,6 +48,11 @@ jobs:
         run: uv run ruff check .
 
       - name: Run non-integration tests
+        env:
+          WC_STORE_URL: "https://example.com"
+          WC_CONSUMER_KEY: "dummy_key"
+          WC_CONSUMER_SECRET: "dummy_secret"
+          GEMINI_API_KEY: "dummy_gemini_key"
         run: uv run pytest tests/ -m "not integration" -q
 
   build-and-deploy:
