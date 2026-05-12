@@ -1,5 +1,10 @@
 # Voice Commerce Agent
 
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Ruff](https://img.shields.io/badge/lint-ruff-yellow.svg)](https://docs.astral.sh/ruff/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.135-teal.svg)](https://fastapi.tiangolo.com/)
+
 Real-time AI voice commerce for storefronts. Customers can speak naturally, search products semantically, see the page respond with highlights and filters, add items to cart, and complete a guided checkout flow through one embeddable widget.
 
 Built with FastAPI, Gemini Live API, Qdrant, sentence-transformers, PostgreSQL-ready session persistence, Prometheus metrics, Langfuse tracing, and Docker-based deployment assets.
@@ -321,7 +326,7 @@ deploy/
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/voice-commerce-agent.git
+git clone https://github.com/mahmoud-emad-dev/voice-commerce-agent.git
 cd voice-commerce-agent
 uv sync
 cp .env.example .env

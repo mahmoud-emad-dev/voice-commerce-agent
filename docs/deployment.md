@@ -45,7 +45,7 @@ sudo usermod -aG docker $USER
 
 sudo mkdir -p /opt/voice-commerce-agent
 sudo chown "$USER":"$USER" /opt/voice-commerce-agent
-git clone https://github.com/YOUR_ORG/voice-commerce-agent.git /opt/voice-commerce-agent
+git clone https://github.com/mahmoud-emad-dev/voice-commerce-agent.git /opt/voice-commerce-agent
 cd /opt/voice-commerce-agent
 ```
 
